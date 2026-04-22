@@ -27,8 +27,8 @@ interface Section {
  */
 const SECTIONS: Section[] = [
   { label: "Contacts", href: "/contacts" },
+  { label: "Prompts", href: "/prompts" },
   { label: "Emails" },
-  { label: "Prompts" },
   { label: "Cron runs" },
   { label: "Personas" },
   { label: "Channels" },
