@@ -29,11 +29,11 @@ const SECTIONS: Section[] = [
   { label: "Contacts", href: "/contacts" },
   { label: "Prompts", href: "/prompts" },
   { label: "Cron runs", href: "/cron-runs" },
+  { label: "Status", href: "/status" },
   { label: "Emails" },
   { label: "Personas" },
   { label: "Channels" },
   { label: "Migration console" },
-  { label: "Status" },
 ];
 
 export default async function AdminHome() {
