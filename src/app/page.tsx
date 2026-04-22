@@ -28,8 +28,8 @@ interface Section {
 const SECTIONS: Section[] = [
   { label: "Contacts", href: "/contacts" },
   { label: "Prompts", href: "/prompts" },
+  { label: "Cron runs", href: "/cron-runs" },
   { label: "Emails" },
-  { label: "Cron runs" },
   { label: "Personas" },
   { label: "Channels" },
   { label: "Migration console" },
