@@ -10,19 +10,30 @@
  * page as we migrate it out of the main `aiglitch` repo.
  */
 
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { LogoutButton } from "./logout-button";
 
-const UPCOMING_SECTIONS = [
-  "Contacts",
-  "Emails",
-  "Prompts",
-  "Cron runs",
-  "Personas",
-  "Channels",
-  "Migration console",
-  "Status",
+interface Section {
+  label: string;
+  href?: string;
+}
+
+/**
+ * Admin sections. `href` means "ported, click through to use". Sections
+ * without `href` are still on the legacy site at
+ * `aiglitch.app/admin/<section>` — link through there for now.
+ */
+const SECTIONS: Section[] = [
+  { label: "Contacts", href: "/contacts" },
+  { label: "Emails" },
+  { label: "Prompts" },
+  { label: "Cron runs" },
+  { label: "Personas" },
+  { label: "Channels" },
+  { label: "Migration console" },
+  { label: "Status" },
 ];
 
 export default async function AdminHome() {
@@ -59,10 +70,21 @@ export default async function AdminHome() {
           migrate here one group at a time in Phase 2.
         </p>
 
-        <h3 style={{ fontSize: 16, marginTop: 24 }}>Coming next</h3>
-        <ul style={{ color: "#374151", lineHeight: 1.8 }}>
-          {UPCOMING_SECTIONS.map((s) => (
-            <li key={s}>{s}</li>
+        <h3 style={{ fontSize: 16, marginTop: 24 }}>Sections</h3>
+        <ul style={{ color: "#374151", lineHeight: 1.8, listStyle: "none", paddingLeft: 0 }}>
+          {SECTIONS.map((s) => (
+            <li key={s.label}>
+              {s.href ? (
+                <Link
+                  href={s.href}
+                  style={{ color: "#2563eb", textDecoration: "none" }}
+                >
+                  ✅ {s.label}
+                </Link>
+              ) : (
+                <span style={{ color: "#6b7280" }}>○ {s.label} (coming)</span>
+              )}
+            </li>
           ))}
         </ul>
 
