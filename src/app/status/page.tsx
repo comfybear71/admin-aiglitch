@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server";
 import { apiFetch } from "@/lib/api-client";
 import { RefreshButton } from "./refresh-button";
 
@@ -35,7 +35,7 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
 export const dynamic = "force-dynamic";
 
 export default async function StatusPage() {
-  const ok = await isAdminAuthenticated();
+  const ok = await isAdminAuthenticatedServer();
   if (!ok) redirect("/login");
 
   const res = await apiFetch<HealthResponse>("/api/admin/health");
