@@ -1,0 +1,283 @@
+@import "tailwindcss";
+
+:root {
+  --background: #000000;
+  --foreground: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: #000000;
+  color: #ffffff;
+  font-family: var(--font-mono), monospace;
+  overscroll-behavior: none;
+  overflow-x: hidden;
+}
+
+/* Prevent pull-to-refresh on mobile */
+html, body {
+  overscroll-behavior-y: contain;
+}
+
+/* Hide scrollbar for TikTok-style scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Snap scroll behavior */
+.snap-y {
+  scroll-snap-type: y mandatory;
+}
+
+.snap-start {
+  scroll-snap-align: start;
+}
+
+/* Line clamp for text overflow */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Slide up animation for share/comments panels */
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+/* Glitch animation */
+@keyframes glitch {
+  0% { text-shadow: 2px 0 #ff00ff, -2px 0 #00ffff; }
+  25% { text-shadow: -2px 0 #ff00ff, 2px 0 #00ffff; }
+  50% { text-shadow: 2px 2px #ff00ff, -2px -2px #00ffff; }
+  75% { text-shadow: -2px 2px #ff00ff, 2px -2px #00ffff; }
+  100% { text-shadow: 2px 0 #ff00ff, -2px 0 #00ffff; }
+}
+
+.glitch-text {
+  animation: glitch 0.3s ease-in-out infinite alternate;
+}
+
+/* Gradient text animation */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.gradient-animate {
+  background-size: 200% 200%;
+  animation: gradient-shift 3s ease infinite;
+}
+
+/* Pulse glow effect */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(168, 85, 247, 0.2); }
+  50% { box-shadow: 0 0 40px rgba(168, 85, 247, 0.4); }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Loading bar animation */
+@keyframes loading-bar {
+  0% { width: 0%; }
+  50% { width: 70%; }
+  100% { width: 100%; }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 2s ease-in-out infinite;
+}
+
+/* Glitch effect for logo image */
+@keyframes glitch-logo {
+  0%, 90% { transform: translate(0); filter: none; }
+  91% { transform: translate(-3px, 1px); filter: hue-rotate(90deg); }
+  92% { transform: translate(2px, -1px); filter: hue-rotate(-90deg) saturate(2); }
+  93% { transform: translate(-1px, 2px); filter: hue-rotate(180deg); }
+  94% { transform: translate(3px, -2px); filter: hue-rotate(-45deg) brightness(1.5); }
+  95% { transform: translate(0); filter: none; }
+  96% { transform: translate(-2px, -1px) skewX(2deg); filter: hue-rotate(90deg); }
+  97% { transform: translate(1px, 2px) skewX(-1deg); filter: hue-rotate(-90deg); }
+  98%, 100% { transform: translate(0); filter: none; }
+}
+
+.glitch-logo {
+  animation: glitch-logo 3s ease-in-out infinite;
+  position: relative;
+}
+
+.glitch-logo::before,
+.glitch-logo::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: inherit;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.glitch-logo::before {
+  animation: glitch-logo 2.5s ease-in-out infinite reverse;
+  opacity: 0.08;
+  filter: hue-rotate(90deg);
+}
+
+.glitch-logo::after {
+  animation: glitch-logo 3.5s ease-in-out infinite;
+  opacity: 0.08;
+  filter: hue-rotate(-90deg);
+}
+
+/* Breaking news flash for tab indicator */
+@keyframes breaking-flash {
+  0%, 100% { opacity: 1; color: #f87171; text-shadow: 0 0 4px rgba(248, 113, 113, 0.3); }
+  50% { opacity: 0.4; color: #fbbf24; text-shadow: 0 0 8px rgba(248, 113, 113, 0.6); }
+}
+
+.breaking-flash {
+  animation: breaking-flash 1.2s ease-in-out infinite;
+}
+
+/* Red dot pulse for breaking news badge */
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
+}
+
+.dot-pulse {
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+
+/* Rotating coin animation */
+@keyframes coin-rotate {
+  0% { transform: rotateY(0deg); }
+  100% { transform: rotateY(360deg); }
+}
+
+.coin-rotate {
+  animation: coin-rotate 3s linear infinite;
+  transform-style: preserve-3d;
+}
+
+/* Popup ad slide animations */
+@keyframes ad-slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes ad-slide-down {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(100%); opacity: 0; }
+}
+
+.animate-ad-slide-up {
+  animation: ad-slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-ad-slide-down {
+  animation: ad-slide-down 0.3s ease-in forwards;
+}
+
+/* NFT Trading Card holographic effect for legendary rarity */
+@keyframes holo-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.card-holographic {
+  position: relative;
+}
+
+.card-holographic::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 215, 0, 0.08) 0%,
+    rgba(255, 100, 255, 0.06) 25%,
+    rgba(100, 200, 255, 0.08) 50%,
+    rgba(255, 215, 0, 0.06) 75%,
+    rgba(100, 255, 100, 0.08) 100%
+  );
+  background-size: 300% 300%;
+  animation: holo-shift 4s ease infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Soundwave animation for TTS playing state */
+@keyframes soundwave {
+  0% { height: 20%; }
+  100% { height: 100%; }
+}
+
+.soundwave-bar {
+  animation: soundwave ease-in-out infinite alternate;
+}
+
+/* Fade-in animation for hatching completion */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+/* Dynamic viewport height for mobile Safari */
+@supports (height: 100dvh) {
+  .h-screen {
+    height: 100dvh;
+  }
+}
+
+/* Respect user's motion preference — pause infinite animations to save CPU/battery */
+@media (prefers-reduced-motion: reduce) {
+  .glitch-text,
+  .glitch-logo,
+  .glitch-logo::before,
+  .glitch-logo::after,
+  .gradient-animate,
+  .pulse-glow,
+  .animate-loading-bar,
+  .breaking-flash,
+  .dot-pulse,
+  .coin-rotate,
+  .card-holographic::before,
+  .soundwave-bar {
+    animation: none !important;
+  }
+}
+
+/* GPU-hint the heaviest infinite animations so they don't trigger layout/paint */
+.glitch-logo,
+.coin-rotate {
+  will-change: transform, filter;
+}
+
+.glitch-text {
+  will-change: text-shadow;
+}
