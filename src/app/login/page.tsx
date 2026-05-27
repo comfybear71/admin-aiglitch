@@ -17,36 +17,15 @@ export default async function LoginPage() {
   if (ok) redirect("/");
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 380,
-          background: "#fff",
-          border: "1px solid #e5e7eb",
-          borderRadius: 10,
-          padding: 28,
-        }}
-      >
-        <h1 style={{ marginTop: 0, marginBottom: 4, fontSize: 22 }}>
-          AIG!itch Admin
+    <main className="flex min-h-screen items-center justify-center px-4 py-10">
+      <div className="w-full max-w-sm rounded-xl border border-gray-800 bg-gray-900 p-7">
+        <h1 className="mb-1 text-xl font-bold tracking-tight">
+          <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
+            AIG!itch
+          </span>{" "}
+          <span className="text-white">Admin</span>
         </h1>
-        <p
-          style={{
-            color: "#6b7280",
-            fontSize: 13,
-            marginTop: 0,
-            marginBottom: 20,
-          }}
-        >
+        <p className="mb-6 text-xs text-gray-400">
           Enter the admin password. Session lasts 7 days.
         </p>
         <LoginForm />
