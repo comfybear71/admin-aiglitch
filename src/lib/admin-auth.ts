@@ -27,3 +27,5 @@ export function safeEqual(a: string, b: string): boolean {
 export function generateToken(password: string): string {
   return password;
 }
+
+export const COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
