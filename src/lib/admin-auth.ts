@@ -1,59 +1,31 @@
 /**
- * Admin auth — HMAC cookie.
- *
- * Same contract as `aiglitch-api/src/lib/admin-auth.ts` so rotating
- * `ADMIN_PASSWORD` anywhere it's set invalidates every existing token
- * everywhere it's accepted.
- *
- * Cookie name: `aiglitch-admin-token`. Scope: `admin.aiglitch.app`
- * (no shared `.aiglitch.app` domain attribute — each subdomain keeps
- * its own cookie, which means the admin logs in once per origin).
+ * Admin Authentication — Client-Safe Version
+ * ===========================================
+ * For admin-aiglitch UI only. No server-side dependencies.
+ * Cookie is set by /api/auth/admin route on the backend.
  */
-
-import { cookies } from "next/headers";
-import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const ADMIN_COOKIE = "aiglitch-admin-token";
-export const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 /**
- * Constant-time string comparison — same CPU time regardless of
- * where the strings diverge. Prevents timing-side-channel attacks
- * on password/token checks.
+ * Check if admin cookie exists (client-side check).
+ * Note: This doesn't validate the cookie value; it just checks presence.
+ * The backend validates the token when you call protected /api/admin/* routes.
  */
+export function isAdminAuthenticated(): boolean {
+  if (typeof document === "undefined") return false; // Server-side
+  const cookies = document.cookie.split(";").map(c => c.trim());
+  return cookies.some(c => c.startsWith(`${ADMIN_COOKIE}=`));
+}
+
+/** Dummy function for compatibility */
 export function safeEqual(a: string, b: string): boolean {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  const bufA = Buffer.from(a, "utf-8");
-  const bufB = Buffer.from(b, "utf-8");
-  if (bufA.length !== bufB.length) {
-    timingSafeEqual(bufA, bufA);
-    return false;
-  }
-  return timingSafeEqual(bufA, bufB);
+  return a === b;
 }
 
-/**
- * Deterministic HMAC-SHA256 session token. Same password → same
- * token across all serverless instances. Changing the password
- * invalidates every outstanding token. Not reversible.
- */
+/** Dummy function for compatibility */
 export function generateToken(password: string): string {
-  return createHmac("sha256", password)
-    .update("aiglitch-admin-session-v1")
-    .digest("hex");
+  return password;
 }
 
-/**
- * True when the request carries a valid admin cookie. Call from any
- * server component / route handler that should be admin-gated.
- */
-export async function isAdminAuthenticated(): Promise<boolean> {
-  const adminPassword = process.env.ADMIN_PASSWORD;
-  if (!adminPassword) return false;
-
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_COOKIE);
-  if (!token?.value) return false;
-
-  return safeEqual(token.value, generateToken(adminPassword));
-}
+export const COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days

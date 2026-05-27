@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { resetPrompt, savePrompt } from "./actions";
 
 export interface PromptOverride {
   id: number;
@@ -41,8 +40,19 @@ export function PromptsClient({ overrides }: Props) {
       return;
     setErr(null);
     startTransition(async () => {
-      const result = await resetPrompt({ category: o.category, key: o.key });
-      if (!result.ok) setErr(result.error);
+      try {
+        const res = await fetch("/api/admin/prompts", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category: o.category, key: o.key }),
+        });
+        if (!res.ok) {
+          const data = await res.json() as { error?: string };
+          setErr(data.error || "Reset failed");
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Unknown error");
+      }
     });
   };
 
@@ -263,12 +273,21 @@ function PromptForm({
   const submit = () => {
     onError(null);
     startTransition(async () => {
-      const result = await savePrompt({ category, key, label, value });
-      if (!result.ok) {
-        onError(result.error);
-        return;
+      try {
+        const res = await fetch("/api/admin/prompts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category, key, label, value }),
+        });
+        if (!res.ok) {
+          const data = await res.json() as { error?: string };
+          onError(data.error || "Save failed");
+          return;
+        }
+        onDone();
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "Unknown error");
       }
-      onDone();
     });
   };
 

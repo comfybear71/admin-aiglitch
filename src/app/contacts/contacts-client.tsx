@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createContact, deleteContact, updateContact } from "./actions";
 
 export interface Contact {
   id: string;
@@ -32,8 +31,19 @@ export function ContactsClient({ initialContacts, allTags }: Props) {
     if (!confirm(`Delete ${c.name ?? c.email}? This cannot be undone.`)) return;
     setErr(null);
     startTransition(async () => {
-      const result = await deleteContact(c.id);
-      if (!result.ok) setErr(result.error);
+      try {
+        const res = await fetch("/api/admin/contacts", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: c.id }),
+        });
+        if (!res.ok) {
+          const data = await res.json() as { error?: string };
+          setErr(data.error || "Delete failed");
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Unknown error");
+      }
     });
   };
 
@@ -216,22 +226,25 @@ function ContactForm({
       .filter(Boolean);
 
     startTransition(async () => {
-      const result =
-        mode === "create"
-          ? await createContact({ name, email, company, tags, notes })
-          : await updateContact({
-              id: initial!.id,
-              name,
-              email,
-              company,
-              tags,
-              notes,
-            });
-      if (!result.ok) {
-        onError(result.error);
-        return;
+      try {
+        const res = await fetch("/api/admin/contacts", {
+          method: mode === "create" ? "POST" : "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            mode === "create"
+              ? { name, email, company, tags, notes }
+              : { id: initial!.id, name, email, company, tags, notes }
+          ),
+        });
+        if (!res.ok) {
+          const data = await res.json() as { error?: string };
+          onError(data.error || "Request failed");
+          return;
+        }
+        onDone();
+      } catch (e) {
+        onError(e instanceof Error ? e.message : "Unknown error");
       }
-      onDone();
     });
   };
 

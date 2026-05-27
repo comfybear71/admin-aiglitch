@@ -17,9 +17,9 @@ import { apiFetch } from "@/lib/api-client";
 import { ContactsClient, type Contact } from "./contacts-client";
 
 interface ContactsResponse {
-  total: number;
-  contacts: Contact[];
-  all_tags: string[];
+  ok: boolean;
+  error?: string;
+  data?: { total: number; contacts: Contact[]; all_tags: string[] };
 }
 
 export const dynamic = "force-dynamic";

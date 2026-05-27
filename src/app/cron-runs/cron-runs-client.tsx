@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { triggerCron } from "./actions";
 
 export interface CronJob {
   name: string;
@@ -59,9 +58,21 @@ export function CronRunsClient({ cronJobs, stats, history }: Props) {
     setErr(null);
     setBusyJob(job.name);
     startTransition(async () => {
-      const result = await triggerCron(job.name);
-      setBusyJob(null);
-      if (!result.ok) setErr(`${job.name}: ${result.error}`);
+      try {
+        const res = await fetch("/api/admin/cron-control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job: job.name }),
+        });
+        const result = await res.json() as { success?: boolean; error?: string };
+        setBusyJob(null);
+        if (!res.ok || !result.success) {
+          setErr(`${job.name}: ${result.error || "Trigger failed"}`);
+        }
+      } catch (e) {
+        setBusyJob(null);
+        setErr(`${job.name}: ${e instanceof Error ? e.message : "Unknown error"}`);
+      }
     });
   };
 
