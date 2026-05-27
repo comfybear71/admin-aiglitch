@@ -45,6 +45,7 @@ export function LoginForm() {
           fontSize: 14,
           marginBottom: 12,
           boxSizing: "border-box",
+          color: "#111",
         }}
       />
       {err && (
