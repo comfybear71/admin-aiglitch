@@ -5,7 +5,45 @@
 
 ---
 
+## Direct-URL-only pages
+
+These pages exist in admin-aiglitch but do NOT appear in the tab strip (kept off to preserve 1:1 visual fidelity with the legacy admin's tab strip). They're reachable only via direct URL or bookmark:
+
+- `admin.aiglitch.app/cron-runs` — scheduled job dashboard + history
+- `admin.aiglitch.app/status` — live health check (DB, Redis, Solana, Anthropic, xAI)
+
+Note: `/prompts` IS in the tab strip — it's a reference-defined tab and appears in the legacy admin too.
+
+If we later want `/cron-runs` and `/status` discoverable from the nav, add a "More" or "Tools" dropdown at the end of the tab strip — that preserves visual parity since the dropdown opens on click. Future enhancement, not now.
+
+---
+
 ## Session log (newest first)
+
+### 2026-05-27 (late evening) — Visual fidelity pass (admin shell + overview dashboard)
+
+**Status:** admin.aiglitch.app now matches the legacy aiglitch.app/admin shell pixel-for-pixel. Header, tab strip, overview dashboard, password gate all ported.
+
+**Shipped (PR TBD):**
+- **`src/app/admin-shell.tsx` (new)** — port of legacy `src/app/admin/layout.tsx` AdminShell. Sticky gradient-bordered header (⚙️ + purple→pink "AIG!itch" + "Admin"), Feed + Activity pills (cross-domain to aiglitch.app), generation-progress panel, 22-tab horizontal strip (purple/20 active, gray-900 inactive), max-w-7xl content container. Rewired `navigateToTab` to push `/${id}` (no `/admin` prefix; admin-aiglitch lives at subdomain root). Auth-check useEffect calls `/api/admin/stats` and flips `setAuthenticated(true)` on 200 — wakes up `useAdmin()`-driven pages. Shell is suppressed on `/login`.
+- **`src/app/client-layout.tsx` (updated)** — wraps children in `AdminProvider` + `AdminShell`.
+- **`src/app/page.tsx` (rewritten)** — was a Phase 1 placeholder; now a thin Server Component that runs `isAdminAuthenticatedServer()` and renders `OverviewClient`. Preserves server-side cookie gate from PR #7.
+- **`src/app/overview-client.tsx` (new)** — verbatim port of legacy `src/app/admin/page.tsx`. Stat grid, Content Breakdown, AI Platform Sources, Special Content, Top Personas, Recent Posts. Top-persona links point to `https://aiglitch.app/profile/<username>` (cross-domain; admin doesn't host profile pages).
+- **`src/app/login/page.tsx` (restyled)** — matches the legacy password-gate visual: 🔒, "AIG!itch Admin" gradient title, "Control Center" subtitle, `rounded-2xl` card, gray-700 border, p-8.
+- **`src/app/login/login-form.tsx` (restyled)** — eye-toggle on the password input, "Enter Control Center" gradient button, error styling matched to legacy.
+
+**Deferred / out of scope (called out explicitly):**
+- `/cron-runs`, `/status` not in tab strip — direct URL only (see "Direct-URL-only pages" above).
+- `src/app/logout-button.tsx` left on disk but no longer rendered (legacy admin has no logout button either). Cookie expires after 7 days; clear cookie manually for early logout. Future PR can wire it into the shell if desired.
+- `/contacts` keeps its Server Component + apiFetch architecture (per CLAUDE.md "no backend code" rule).
+- `admin-types.ts` + `AdminContext.tsx` left byte-identical to the legacy reference — no divergence.
+- Strict TypeScript still on `ignoreBuildErrors` (parked).
+- 401 fetch interceptor still parked.
+- `/api/auth/admin/validate` endpoint on aiglitch-api still parked.
+
+**Branches:** `claude/visual-fidelity-fix` (PR open).
+
+---
 
 ### 2026-05-27 (evening) — Login-loop fix + dark theme on landing
 
