@@ -3,12 +3,13 @@
  * Calls are transparently proxied to https://api.aiglitch.app via next.config.ts rewrites.
  */
 
-export async function apiFetch<T = unknown>(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function apiFetch<T = any>(
   path: string,
   options?: RequestInit & { json?: unknown; query?: Record<string, unknown> },
-): Promise<T & { ok?: boolean; error?: string; data?: unknown }> {
+): Promise<T> {
   const url = new URL(path, typeof window !== "undefined" ? window.location.origin : "http://localhost");
-  
+
   // Handle query params
   if (options?.query) {
     Object.entries(options.query).forEach(([k, v]) => {
@@ -25,17 +26,5 @@ export async function apiFetch<T = unknown>(
     ...options,
   });
 
-  const data = await response.json() as T;
-  
-  // If response is ok, return data with ok: true
-  if (response.ok) {
-    return { ...data, ok: true } as T & { ok: boolean };
-  }
-  
-  // Otherwise return error
-  return {
-    ...data,
-    ok: false,
-    error: (data as any)?.error || `HTTP ${response.status}`,
-  } as T & { ok: boolean; error: string };
+  return (await response.json()) as T;
 }

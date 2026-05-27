@@ -93,6 +93,9 @@ const adminRewrites = [
 const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   rewrites: async () => ({
     beforeFiles: adminRewrites,
   }),

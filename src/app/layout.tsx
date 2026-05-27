@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ClientLayout } from "./client-layout";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://admin.aiglitch.app"),
@@ -32,7 +33,7 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body className="bg-black text-white antialiased font-mono">
-        {children}
+        <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
   );
