@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server";
 import { LogoutButton } from "./logout-button";
 
 interface Section {
@@ -37,7 +37,7 @@ const SECTIONS: Section[] = [
 ];
 
 export default async function AdminHome() {
-  const ok = await isAdminAuthenticated();
+  const ok = await isAdminAuthenticatedServer();
   if (!ok) redirect("/login");
 
   return (

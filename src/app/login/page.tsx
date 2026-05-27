@@ -9,11 +9,11 @@
  */
 
 import { redirect } from "next/navigation";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage() {
-  const ok = await isAdminAuthenticated();
+  const ok = await isAdminAuthenticatedServer();
   if (ok) redirect("/");
 
   return (

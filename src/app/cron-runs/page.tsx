@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server";
 import { apiFetch } from "@/lib/api-client";
 import { CronRunsClient, type CronJob, type HistoryRow, type Stats24h } from "./cron-runs-client";
 
@@ -22,7 +22,7 @@ interface CronControlResponse {
 export const dynamic = "force-dynamic";
 
 export default async function CronRunsPage() {
-  const ok = await isAdminAuthenticated();
+  const ok = await isAdminAuthenticatedServer();
   if (!ok) redirect("/login");
 
   const res = await apiFetch<CronControlResponse>("/api/admin/cron-control");

@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server";
 import { apiFetch } from "@/lib/api-client";
 import { ContactsClient, type Contact } from "./contacts-client";
 
@@ -25,7 +25,7 @@ interface ContactsResponse {
 export const dynamic = "force-dynamic";
 
 export default async function ContactsPage() {
-  const ok = await isAdminAuthenticated();
+  const ok = await isAdminAuthenticatedServer();
   if (!ok) redirect("/login");
 
   const res = await apiFetch<ContactsResponse>("/api/admin/contacts");
