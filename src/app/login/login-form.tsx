@@ -29,6 +29,8 @@ export function LoginForm() {
     }
   };
 
+  const disabled = busy || !password;
+
   return (
     <form onSubmit={submit}>
       <input
@@ -37,35 +39,19 @@ export function LoginForm() {
         placeholder="Admin password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        style={{
-          width: "100%",
-          padding: "10px 12px",
-          border: "1px solid #d1d5db",
-          borderRadius: 6,
-          fontSize: 14,
-          marginBottom: 12,
-          boxSizing: "border-box",
-        }}
+        className="mb-3 w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2.5 text-sm text-white placeholder:text-gray-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
       />
       {err && (
-        <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 12 }}>
-          {err}
-        </div>
+        <div className="mb-3 text-xs text-red-400">{err}</div>
       )}
       <button
         type="submit"
-        disabled={busy || !password}
-        style={{
-          width: "100%",
-          padding: "10px 14px",
-          border: "none",
-          borderRadius: 6,
-          background: busy || !password ? "#9ca3af" : "#111",
-          color: "#fff",
-          fontSize: 14,
-          fontWeight: 500,
-          cursor: busy || !password ? "not-allowed" : "pointer",
-        }}
+        disabled={disabled}
+        className={`w-full rounded-md px-4 py-2.5 text-sm font-bold transition-colors ${
+          disabled
+            ? "cursor-not-allowed bg-gray-800 text-gray-500"
+            : "bg-gradient-to-r from-purple-500 to-cyan-500 text-white hover:from-purple-400 hover:to-cyan-400"
+        }`}
       >
         {busy ? "Signing in…" : "Sign in"}
       </button>
