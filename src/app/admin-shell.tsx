@@ -1,0 +1,249 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useAdmin } from "./AdminContext";
+import { TABS, type Tab } from "./admin-types";
+
+const SHELL_SUPPRESSED_PATHS = new Set(["/login"]);
+
+export function AdminShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  if (SHELL_SUPPRESSED_PATHS.has(pathname)) {
+    return <>{children}</>;
+  }
+
+  return <AdminShellInner pathname={pathname}>{children}</AdminShellInner>;
+}
+
+function AdminShellInner({
+  children,
+  pathname,
+}: {
+  children: React.ReactNode;
+  pathname: string;
+}) {
+  const {
+    setAuthenticated,
+    generationLog,
+    setGenerationLog,
+    generating,
+    genProgress,
+    elapsed,
+    autopilotTotal,
+    autopilotCurrent,
+    autopilotQueue,
+  } = useAdmin();
+
+  const [authChecking, setAuthChecking] = useState(true);
+  const router = useRouter();
+
+  useEffect(() => {
+    fetch("/api/admin/stats")
+      .then((res) => {
+        if (res.ok) setAuthenticated(true);
+        setAuthChecking(false);
+      })
+      .catch(() => setAuthChecking(false));
+  }, [setAuthenticated]);
+
+  const pathSegment = pathname.split("/")[1] || "";
+  const activeTab: Tab =
+    (TABS.find((t) => t.id === pathSegment)?.id) || "overview";
+
+  const navigateToTab = (tabId: Tab) => {
+    if (tabId === "overview") {
+      router.push("/");
+    } else {
+      router.push(`/${tabId}`);
+    }
+  };
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-gray-500 text-sm animate-pulse">
+          Checking session...
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black text-white overflow-x-hidden">
+      {/* Admin Header */}
+      <header className="bg-gray-900/80 border-b border-gray-800 sticky top-0 z-50 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 sm:py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xl sm:text-2xl">{"⚙️"}</span>
+              <h1 className="text-base sm:text-lg font-black whitespace-nowrap">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+                  AIG!itch
+                </span>
+                <span className="text-gray-400 ml-1 sm:ml-2 text-xs sm:text-sm font-normal">
+                  Admin
+                </span>
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href="https://aiglitch.app/"
+                className="px-2.5 py-1.5 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700 shrink-0"
+              >
+                {"\u{1F3E0}"} Feed
+              </a>
+              <a
+                href="https://aiglitch.app/activity"
+                className="px-2.5 py-1.5 bg-purple-500/20 text-purple-400 rounded-lg text-xs font-bold hover:bg-purple-500/30 shrink-0"
+              >
+                {"\u{1F4E1}"} Activity
+              </a>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Generation Progress Panel */}
+      {generationLog.length > 0 && (
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 pt-3 sm:pt-4">
+          <div
+            className={`border rounded-xl p-4 ${
+              generating || genProgress || autopilotQueue.length > 0
+                ? "bg-green-950/30 border-green-800/50"
+                : "bg-gray-900 border-gray-800"
+            }`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                {(generating ||
+                  genProgress ||
+                  autopilotQueue.length > 0) && (
+                  <span className="inline-block w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                )}
+                <h3 className="text-sm font-bold text-green-400">
+                  {generating || genProgress
+                    ? autopilotTotal > 0
+                      ? `🤖 AUTOPILOT ${autopilotCurrent}/${autopilotTotal} — Generation in progress...`
+                      : "Generation in progress..."
+                    : autopilotQueue.length > 0
+                    ? `🤖 AUTOPILOT ${autopilotCurrent}/${autopilotTotal} — Next video in ~2 min...`
+                    : autopilotTotal > 0 && autopilotCurrent >= autopilotTotal
+                    ? `✅ AUTOPILOT COMPLETE: ${autopilotTotal} videos`
+                    : "Generation complete"}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setGenerationLog([])}
+                  className="text-xs text-gray-500 hover:text-gray-300"
+                >
+                  Clear
+                </button>
+                {!generating && !genProgress && (
+                  <button
+                    onClick={() => setGenerationLog([])}
+                    className="text-xs text-gray-500 hover:text-gray-300"
+                  >
+                    Dismiss
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {genProgress && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="text-green-300 font-bold">
+                    {genProgress.label} {genProgress.current}/{genProgress.total}
+                  </span>
+                  <span className="text-yellow-400 font-mono tabular-nums">
+                    {Math.floor(elapsed / 60)}:
+                    {String(elapsed % 60).padStart(2, "0")} elapsed
+                  </span>
+                </div>
+                <div className="relative w-full h-3 bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-green-500 transition-all duration-500"
+                    style={{
+                      width: `${
+                        ((genProgress.current - 1) / genProgress.total) * 100
+                      }%`,
+                    }}
+                  />
+                  <div
+                    className="absolute inset-y-0 bg-green-400/60 animate-pulse transition-all duration-500"
+                    style={{
+                      left: `${
+                        ((genProgress.current - 1) / genProgress.total) * 100
+                      }%`,
+                      width: `${(1 / genProgress.total) * 100}%`,
+                    }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+                  <span>{genProgress.current - 1} done</span>
+                  <span>
+                    ~
+                    {Math.max(
+                      1,
+                      Math.ceil(
+                        (genProgress.total - genProgress.current + 1) *
+                          Math.max(elapsed, 60)
+                      )
+                    )}
+                    s remaining (est.)
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="max-h-48 overflow-y-auto space-y-1 font-mono text-xs">
+              {generationLog.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`${
+                    i === generationLog.length - 1 &&
+                    (generating || genProgress)
+                      ? "text-green-300"
+                      : "text-gray-400"
+                  }`}
+                >
+                  <span className="text-gray-600 mr-2">[{i + 1}]</span>
+                  {msg}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+        <div
+          className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-2"
+          style={{ scrollbarWidth: "thin", scrollbarColor: "#4b5563 transparent" }}
+        >
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => navigateToTab(t.id)}
+              className={`flex items-center gap-1 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all ${
+                activeTab === t.id
+                  ? "bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                  : "bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800"
+              }`}
+            >
+              <span>{t.icon}</span>{" "}
+              <span className="hidden sm:inline">{t.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 pb-8">{children}</div>
+    </div>
+  );
+}

@@ -4,11 +4,12 @@ import { useState } from "react";
 
 export function LoginForm() {
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
+    if (!password || busy) return;
     setBusy(true);
     setErr(null);
     try {
@@ -18,7 +19,7 @@ export function LoginForm() {
         body: JSON.stringify({ password }),
       });
       if (!res.ok) {
-        setErr("Invalid credentials");
+        setErr("Invalid password");
         setBusy(false);
         return;
       }
@@ -29,32 +30,35 @@ export function LoginForm() {
     }
   };
 
-  const disabled = busy || !password;
-
   return (
-    <form onSubmit={submit}>
-      <input
-        type="password"
-        autoFocus
-        placeholder="Admin password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        className="mb-3 w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2.5 text-sm text-white placeholder:text-gray-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-      />
-      {err && (
-        <div className="mb-3 text-xs text-red-400">{err}</div>
-      )}
+    <>
+      {err && <p className="text-red-400 text-sm text-center mb-4">{err}</p>}
+      <div className="relative mb-4">
+        <input
+          type={showPassword ? "text" : "password"}
+          autoFocus
+          placeholder="Admin password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          className="w-full px-4 py-3 pr-12 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+        />
+        <button
+          type="button"
+          onClick={() => setShowPassword(!showPassword)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors text-xl"
+          title={showPassword ? "Hide password" : "Show password"}
+        >
+          {showPassword ? "\u{1F648}" : "\u{1F441}️"}
+        </button>
+      </div>
       <button
-        type="submit"
-        disabled={disabled}
-        className={`w-full rounded-md px-4 py-2.5 text-sm font-bold transition-colors ${
-          disabled
-            ? "cursor-not-allowed bg-gray-800 text-gray-500"
-            : "bg-gradient-to-r from-purple-500 to-cyan-500 text-white hover:from-purple-400 hover:to-cyan-400"
-        }`}
+        onClick={submit}
+        disabled={busy || !password}
+        className="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {busy ? "Signing in…" : "Sign in"}
+        {busy ? "Signing in…" : "Enter Control Center"}
       </button>
-    </form>
+    </>
   );
 }
