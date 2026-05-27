@@ -7,6 +7,29 @@
 
 ## Session log (newest first)
 
+### 2026-05-27 (evening) — Login-loop fix + dark theme on landing
+
+**Status:** Two PRs shipped + tagged + deployed to production. admin.aiglitch.app now logs in correctly and matches the legacy admin's dark theme on the landing/login pages.
+
+**Shipped:**
+- **PR #7 — Login loop fix** (`v0.1.1-2026-05-27`). Bootstrap had 6 Server Components (`/`, `/contacts`, `/cron-runs`, `/login`, `/prompts`, `/status`) calling `isAdminAuthenticated()` from `src/lib/admin-auth.ts`, which checks `document.cookie` — undefined on the server, so the gate always failed → redirect-to-login loop after correct password. Added `src/lib/admin-auth.server.ts` with `isAdminAuthenticatedServer()` that reads the cookie via `next/headers` `cookies()`. Patched all 6 Server Components to use the server-side version. Client components left alone (they correctly use `document.cookie`).
+- **PR #8 — Dark theme on landing + login** (`v0.1.2-2026-05-27`). Bootstrap had hand-coded inline light-theme styles on `/`, `/login`, `login-form.tsx`, `logout-button.tsx` — they overrode the dark `<body>` set in `layout.tsx`. Tailwind + dark theme were both wired correctly; the inline `background: "#fff"` was the problem. Replaced inline styles with Tailwind classes using the legacy admin's tokens (bg-gray-900 panels, border-gray-800, amber-400 headings, cyan-400 accents, purple→cyan gradient on brand + primary button).
+
+**Branches:** `claude/optimistic-knuth-zxZpK` (PR #7, merged), `claude/fix-admin-theme` (PR #8, merged). Both branches deleted.
+
+**Open follow-ups (deferred during this session):**
+- Tighten TypeScript strict mode (still on `ignoreBuildErrors`)
+- 401/403 fetch interceptor + redirect-to-login on cookie expiry
+- New `/api/auth/admin/validate` endpoint on aiglitch-api so the server-side cookie check can validate the HMAC, not just presence (currently an invalid cookie passes the gate but all data fetches return 401 — acceptable MVP)
+- Optional `middleware.ts` for early redirects (would centralise the auth gate)
+- Drop dummy `safeEqual` / `generateToken` from `src/lib/admin-auth.ts` once nothing imports them
+- Refactor `AdminContext.tsx` if/when the second wave of pages port over
+- Phase 2 page migrations: build the real dashboard at `/` (currently a phased-migration placeholder)
+
+**Scope discipline this session:** both PRs were tightly scoped per the user's brief. No surrounding cleanup, no scope creep into the deferred items above.
+
+---
+
 ### 2026-05-27 — Bootstrap
 
 **Status:** First session. Repo scaffolded as UI-only Next.js 16 admin app. Connected to api.aiglitch.app via strangler proxy. Ready for first preview deploy + custom domain wiring.
