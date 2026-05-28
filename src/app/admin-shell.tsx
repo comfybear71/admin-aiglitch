@@ -60,13 +60,14 @@ function AdminShellInner({
     }
   };
 
-  const handleSignOut = async () => {
-  try {
-    await fetch("/api/auth/admin", { method: "DELETE" });
-  } finally {
+   const handleSignOut = async (e) => {
+    e.preventDefault();
+    await fetch("/api/auth/admin", {
+      method: "DELETE",
+      credentials: "include"
+    });
     window.location.href = "/login";
-  }
-};
+  };
 
   if (authChecking) {
     return (
