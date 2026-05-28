@@ -96,6 +96,18 @@ const config: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // next/image remote hosts — must match aiglitch.app's whitelist so
+  // persona avatars / generated media (Vercel blob, Replicate, Pexels)
+  // load instead of being rejected by the optimizer.
+  images: {
+    formats: ["image/avif", "image/webp"],
+    remotePatterns: [
+      { protocol: "https", hostname: "**.public.blob.vercel-storage.com" },
+      { protocol: "https", hostname: "**.vercel-storage.com" },
+      { protocol: "https", hostname: "images.pexels.com" },
+      { protocol: "https", hostname: "**.replicate.delivery" },
+    ],
+  },
   rewrites: async () => ({
     beforeFiles: adminRewrites,
   }),
