@@ -1,82 +1,57 @@
 /**
- * Admin Authentication — Client-Safe Version
- * ===========================================
- * For admin-aiglitch UI only. No server-side dependencies.
- * Cookie is set by /api/auth/admin route on the backend.
- */
-
-/**
-export const ADMIN_COOKIE = "aiglitch-admin-token";   //ME CHANGED
-*/
-
-
-/**
- * Check if admin cookie exists (client-side check).
- * Note: This doesn't validate the cookie value; it just checks presence.
- * The backend validates the token when you call protected /api/admin/* routes.
- */
-
-
-//ME CHANGED
-/**
-export function isAdminAuthenticated(): boolean {
-  if (typeof document === "undefined") return false; // Server-side
-  const cookies = document.cookie.split(";").map(c => c.trim());
-  return cookies.some(c => c.startsWith(`${ADMIN_COOKIE}=`));
-}
-*/
-
-
-
-/** Dummy function for compatibility */
-/**
-export function safeEqual(a: string, b: string): boolean {
-  return a === b;
-}
-*/
-
-/** Dummy function for compatibility */
-/**
-export function generateToken(password: string): string {
-  return password;
-}
-*/
-/**
-export const COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
-*/
-
-
-/**
- * Admin Authentication — Client Utilities Only
- * ============================================
- * This file should ONLY be imported in Client Components ("use client").
- * Never import this in Server Components or Route Handlers.
+ * Admin Authentication — Client Utilities
+ * =======================================
  *
- * For Server Components, use: import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server"
+ * This file is intended **only** for Client Components ("use client").
+ *
+ * Never import from this file in:
+ * - Server Components
+ * - Route Handlers
+ * - Server-only modules
+ *
+ * For Server Components, always use:
+ *   import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server"
  */
 
 export const ADMIN_COOKIE = "aiglitch-admin-token";
 
 /**
- * Client-side only check for presence of the admin cookie.
- * This does NOT validate the token — the backend does that on every /api/admin/* request.
+ * Client-side only check for the presence of the admin auth cookie.
+ *
+ * This function does **not** validate the token. The backend
+ * (`aiglitch-api`) validates the token on every protected `/api/admin/*` request.
+ *
+ * If this function is accidentally called on the server, it will log a warning
+ * and return `false`.
  */
 export function isAdminAuthenticatedClient(): boolean {
   if (typeof document === "undefined") {
-    console.warn("isAdminAuthenticatedClient() was called on the server. Use isAdminAuthenticatedServer() instead.");
+    console.warn(
+      "isAdminAuthenticatedClient() was called on the server. " +
+        "Use isAdminAuthenticatedServer() from @/lib/admin-auth.server instead."
+    );
     return false;
   }
 
-  const cookies = document.cookie.split(";").map(c => c.trim());
-  return cookies.some(c => c.startsWith(`${ADMIN_COOKIE}=`));
+  const cookies = document.cookie.split(";").map((c) => c.trim());
+  return cookies.some((c) => c.startsWith(`${ADMIN_COOKIE}=`));
 }
 
-// Keep the old name as an alias for now (for backward compatibility during migration)
+/**
+ * Alias kept for backward compatibility during the migration.
+ * Prefer using `isAdminAuthenticatedClient` explicitly in new client code.
+ */
 export const isAdminAuthenticated = isAdminAuthenticatedClient;
 
-// These are intentionally left as dummies in the client file.
-// Real token generation/validation happens in aiglitch-api.
-// We will clean these up properly in a follow-up PR.
+/**
+ * Temporary dummy implementations.
+ *
+ * These exist only to keep the login route working during the transition.
+ * The real HMAC-based token generation and validation lives in `aiglitch-api`.
+ *
+ * TODO: Remove these once proper shared auth logic is implemented
+ *       (planned for a follow-up PR).
+ */
 export function safeEqual(a: string, b: string): boolean {
   return a === b;
 }
@@ -86,5 +61,3 @@ export function generateToken(password: string): string {
 }
 
 export const COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
-
-
