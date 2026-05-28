@@ -18,7 +18,45 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ---
 
+## ⚠️ Backend coordination needed (aiglitch-api PRs)
+
+Features whose UI is fully ported here but blocked on a backend endpoint that
+still returns a deferred/501 response. Per CLAUDE.md hard rule #4, the endpoint
+ships in **aiglitch-api FIRST**, then it just works here with no changes.
+
+### Hero / Poster image generation (Personas tab → "Generate Hero Image" / "AIG!itch Platform Poster")
+
+- **Symptom:** button returns `Generation failed: Hero-image generators not yet
+  ported (lib/marketing/hero-image — 513-line lib pending). Use the legacy admin
+  in the meantime.`
+- **Where:** the UI POSTs `/api/admin/mktg` (`action=generate_hero` /
+  `generate_poster`) → proxied to api.aiglitch.app. admin-aiglitch is correct;
+  it just surfaces the backend message.
+- **Root cause (in aiglitch-api):** `src/app/api/admin/mktg/route.ts:49` returns
+  a 501 for these actions because `lib/marketing/hero-image.ts` (513 lines) was
+  never ported from the legacy consumer repo. A test
+  (`mktg/route.test.ts:221`) locks in the 501.
+- **Source to port:** `aiglitch/src/lib/marketing/hero-image.ts` (legacy consumer
+  repo) → `aiglitch-api/src/lib/marketing/hero-image.ts`.
+- **aiglitch-api PR scope:** port `hero-image.ts`, wire it into the
+  `generate_hero` / `generate_poster` (and `preview_hero_prompt` /
+  `preview_poster_prompt`) cases of the mktg route, flip the test from 501→200.
+- **admin-aiglitch action:** NONE. No rewrite change needed (`/api/admin/mktg`
+  is already proxied). Works automatically once aiglitch-api ships.
+
+---
+
 ## Session log (newest first)
+
+### 2026-05-28 — Diagnosed hero-image 501 (backend coordination, no code change here)
+
+User hit "Generation failed: Hero-image generators not yet ported" on the
+Personas tab. Traced it: the 501 originates in aiglitch-api's mktg route, not
+here. admin-aiglitch's UI + `/api/admin/mktg` proxy are both correct. Logged a
+backend-coordination note above (port `lib/marketing/hero-image.ts` to
+aiglitch-api). No admin-aiglitch changes — UI-only repo, per CLAUDE.md hard
+rule #4. Separately shipped PR #11 (next/image remotePatterns) so persona
+avatars load.
 
 ### 2026-05-27 (late evening) — Visual fidelity pass (admin shell + overview dashboard)
 
