@@ -116,6 +116,7 @@ function AdminShellInner({
             
               {/* ================== SIGN OUT BUTTON ================== */}
               <button
+                type="button"
                 onClick={handleSignOut}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
               >
