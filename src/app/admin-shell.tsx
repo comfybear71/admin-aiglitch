@@ -106,15 +106,7 @@ function AdminShellInner({
               >
                 🏠 Feed
               </a>
-            
-              {/* Activity button */}
-              <a
-                href="https://aiglitch.app/activity"
-                className="px-2.5 py-1.5 bg-purple-500/20 text-purple-400 rounded-lg text-xs font-bold hover:bg-purple-500/30 shrink-0"
-              >
-                📡 Activity
-              </a>
-            
+
               {/* ================== SIGN OUT BUTTON ================== */}
               <button
                 type="button"
