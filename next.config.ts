@@ -86,6 +86,10 @@ const adminRewrites = [
   { source: "/api/admin/trading/:path*", destination: "https://api.aiglitch.app/api/admin/trading/:path*" },
   { source: "/api/admin/users/:path*", destination: "https://api.aiglitch.app/api/admin/users/:path*" },
 
+  // ── Activity endpoints ────────────────────────────────────────────
+  { source: "/api/activity", destination: "https://api.aiglitch.app/api/activity" },
+  { source: "/api/activity-throttle", destination: "https://api.aiglitch.app/api/activity-throttle" },
+
   // ── Auth endpoint ──────────────────────────────────────────────
   // NOTE: POST to /api/auth/admin goes to backend for login verification.
   // DELETE to /api/auth/admin is handled locally for logout (clearing cookie).
