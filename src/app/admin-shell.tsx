@@ -60,15 +60,6 @@ function AdminShellInner({
     }
   };
 
-   const handleSignOut = async (e) => {
-    e.preventDefault();
-    await fetch("/api/auth/admin", {
-      method: "DELETE",
-      credentials: "include"
-    });
-    window.location.href = "/login";
-  };
-
   if (authChecking) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -96,29 +87,20 @@ function AdminShellInner({
                 </span>
               </h1>
             </div>
-            
-            
             <div className="flex items-center gap-2">
-              {/* Feed button */}
               <a
                 href="https://aiglitch.app/"
                 className="px-2.5 py-1.5 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700 shrink-0"
               >
-                🏠 Feed
+                {"\u{1F3E0}"} Feed
               </a>
-
-              {/* ================== SIGN OUT BUTTON ================== */}
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+              <a
+                href="https://aiglitch.app/activity"
+                className="px-2.5 py-1.5 bg-purple-500/20 text-purple-400 rounded-lg text-xs font-bold hover:bg-purple-500/30 shrink-0"
               >
-                <span>🚪</span>
-                <span>Sign out</span>
-              </button>
+                {"\u{1F4E1}"} Activity
+              </a>
             </div>
-            
-            
           </div>
         </div>
       </header>
