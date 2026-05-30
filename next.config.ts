@@ -87,7 +87,10 @@ const adminRewrites = [
   { source: "/api/admin/users/:path*", destination: "https://api.aiglitch.app/api/admin/users/:path*" },
 
   // ── Auth endpoint ──────────────────────────────────────────────
-  { source: "/api/auth/admin", destination: "https://api.aiglitch.app/api/auth/admin" },
+  // NOTE: POST to /api/auth/admin goes to backend for login verification.
+  // DELETE to /api/auth/admin is handled locally for logout (clearing cookie).
+  // We don't rewrite here because DELETE needs local handling.
+  // Login POST is handled by local route which validates against ADMIN_PASSWORD env var.
 ];
 
 const config: NextConfig = {
