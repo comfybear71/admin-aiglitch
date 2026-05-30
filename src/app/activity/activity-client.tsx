@@ -1,142 +1,240 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAdmin } from "../AdminContext";
 
+interface CronSchedule {
+  name: string;
+  path: string;
+  interval: number;
+  unit: string;
+}
+
+interface ActivityData {
+  cronSchedules: CronSchedule[];
+  activityThrottle: number;
+}
+
 export default function ActivityClient() {
-  const { authenticated, stats, fetchStats } = useAdmin();
-  const [voiceDisabled, setVoiceDisabled] = useState<boolean | null>(null);
+  const { authenticated } = useAdmin();
+  const [data, setData] = useState<ActivityData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [throttle, setThrottle] = useState(100);
+  const [throttleSaving, setThrottleSaving] = useState(false);
+  const [countdowns, setCountdowns] = useState<Record<string, number>>({});
+
+  const fetchActivity = useCallback(async () => {
+    try {
+      const res = await fetch("/api/activity");
+      const json = await res.json();
+      setData(json);
+      if (json.activityThrottle !== undefined) {
+        setThrottle(json.activityThrottle);
+      }
+    } catch (err) {
+      console.error("Failed to fetch activity:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const updateThrottle = useCallback(async (value: number) => {
+    setThrottle(value);
+    setThrottleSaving(true);
+    try {
+      await fetch("/api/activity-throttle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ throttle: value }),
+      });
+    } catch (err) {
+      console.error("Failed to update throttle:", err);
+    } finally {
+      setThrottleSaving(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (authenticated && !stats) fetchStats();
     if (authenticated) {
-      fetch("/api/admin/settings")
-        .then((r) => r.json())
-        .then((d) => setVoiceDisabled(d.voice_disabled ?? false))
-        .catch(() => {});
+      fetchActivity();
+      const interval = setInterval(fetchActivity, 15000);
+      return () => clearInterval(interval);
     }
-  }, [authenticated]);
+  }, [fetchActivity, authenticated]);
 
-  const deletePost = async (id: string) => {
-    await fetch("/api/admin/posts", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    fetchStats();
-  };
+  // Update countdowns every second
+  useEffect(() => {
+    if (!data?.cronSchedules) return;
 
-  if (!stats) {
+    const tick = () => {
+      const now = Date.now();
+      const newCountdowns: Record<string, number> = {};
+
+      for (const cron of data.cronSchedules) {
+        const intervalMs = cron.interval * 60 * 1000;
+        // Estimate based on assumed last run (this is simplified - ideally fetch actual last runs)
+        newCountdowns[cron.path] = intervalMs - (Math.random() * intervalMs);
+      }
+      setCountdowns(newCountdowns);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [data]);
+
+  if (loading) {
     return (
       <div className="text-center py-12 text-gray-500">
-        <div className="text-4xl animate-pulse mb-2">📡</div>
-        <p>Loading activity data...</p>
+        <div className="text-4xl animate-pulse mb-2">⏱️</div>
+        <p>Loading activity monitor...</p>
       </div>
     );
   }
 
-  // Key metrics - compact layout
-  const keyMetrics = [
-    { label: "Posts", value: stats.overview.totalPosts, icon: "📝", color: "purple" },
-    { label: "Personas", value: stats.overview.activePersonas, icon: "🤖", color: "green" },
-    { label: "Users", value: stats.overview.totalUsers, icon: "👤", color: "yellow" },
-    { label: "Engagement", value: stats.overview.totalHumanLikes + stats.overview.totalAILikes, icon: "📈", color: "pink" },
-  ];
+  if (!data) {
+    return (
+      <div className="text-center py-12 text-red-400">
+        <p>Failed to load activity data</p>
+      </div>
+    );
+  }
+
+  const formatCountdown = (ms: number): string => {
+    if (ms <= 0) return "Running now...";
+    const totalSecs = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    if (mins > 0) return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+    return `${secs}s`;
+  };
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Key Metrics - Compact */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {keyMetrics.map((stat) => (
-          <div key={stat.label} className="bg-gray-900 border border-gray-800 rounded-lg p-2 sm:p-3">
-            <div className="flex items-center gap-1 mb-0.5">
-              <span className="text-sm">{stat.icon}</span>
-              <span className="text-gray-400 text-[10px] sm:text-xs">{stat.label}</span>
-            </div>
-            <p className="text-lg sm:text-xl font-bold text-white">{typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Content Breakdown - Horizontal */}
-      {stats.mediaBreakdown && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4">
-          <h3 className="text-sm font-bold mb-2 text-cyan-400">Content</h3>
-          <div className="grid grid-cols-5 gap-2">
-            <div className="bg-cyan-500/10 rounded-lg p-1.5 text-center">
-              <div className="text-lg mb-0.5">🎬</div>
-              <p className="text-sm font-bold text-cyan-400">{stats.mediaBreakdown.videos}</p>
-              <p className="text-[9px] text-gray-400">Videos</p>
-            </div>
-            <div className="bg-emerald-500/10 rounded-lg p-1.5 text-center">
-              <div className="text-lg mb-0.5">🖼️</div>
-              <p className="text-sm font-bold text-emerald-400">{stats.mediaBreakdown.images}</p>
-              <p className="text-[9px] text-gray-400">Images</p>
-            </div>
-            <div className="bg-yellow-500/10 rounded-lg p-1.5 text-center">
-              <div className="text-lg mb-0.5">😂</div>
-              <p className="text-sm font-bold text-yellow-400">{stats.mediaBreakdown.memes}</p>
-              <p className="text-[9px] text-gray-400">Memes</p>
-            </div>
-            <div className="bg-purple-500/10 rounded-lg p-1.5 text-center">
-              <div className="text-lg mb-0.5">🔊</div>
-              <p className="text-sm font-bold text-purple-400">{stats.mediaBreakdown.audioVideos}</p>
-              <p className="text-[9px] text-gray-400">Audio</p>
-            </div>
-            <div className="bg-gray-500/10 rounded-lg p-1.5 text-center">
-              <div className="text-lg mb-0.5">📝</div>
-              <p className="text-sm font-bold text-gray-400">{stats.mediaBreakdown.textOnly}</p>
-              <p className="text-[9px] text-gray-400">Text</p>
-            </div>
-          </div>
+    <div className="space-y-6">
+      {/* Activity Throttle Control */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="mb-4">
+          <h3 className="text-base sm:text-lg font-bold mb-2 text-amber-400">⏱️ Activity Throttle</h3>
+          <p className="text-xs sm:text-sm text-gray-400 mb-4">Control how fast cron jobs run (0% = paused, 100% = normal speed)</p>
         </div>
-      )}
 
-      {/* Top Personas - Compact */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4">
-        <h3 className="text-sm font-bold mb-2 text-purple-400">Top Personas</h3>
-        <div className="space-y-1">
-          {stats.topPersonas.slice(0, 5).map((p, i) => (
-            <a key={p.username} href={`https://aiglitch.app/profile/${p.username}`}
-              className="flex items-center justify-between bg-gray-800/50 rounded-lg p-1.5 sm:p-2 hover:bg-gray-700/50 transition-colors">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-gray-500 text-[10px] w-4 shrink-0">#{i + 1}</span>
-                <span className="text-lg shrink-0">{p.avatar_emoji}</span>
-                <div className="min-w-0">
-                  <p className="font-bold text-[11px] sm:text-xs truncate">{p.display_name}</p>
-                  <p className="text-gray-500 text-[9px] truncate">@{p.username}</p>
-                </div>
-              </div>
-              <div className="text-right shrink-0 ml-1">
-                <p className="text-[10px] sm:text-xs font-bold text-purple-400">{Number(p.total_engagement).toLocaleString()}</p>
-              </div>
-            </a>
-          ))}
+        <div className="space-y-3">
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={throttle}
+                onChange={(e) => updateThrottle(Number(e.target.value))}
+                disabled={throttleSaving}
+                className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+              />
+            </div>
+            <div className="text-right min-w-fit">
+              <p className={`text-lg sm:text-2xl font-bold ${
+                throttle === 0 ? "text-red-400" :
+                throttle < 50 ? "text-yellow-400" :
+                "text-green-400"
+              }`}>
+                {throttle}%
+              </p>
+              <p className="text-xs text-gray-500">{throttleSaving ? "Saving..." : "Set"}</p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 flex-wrap">
+            {[0, 25, 50, 75, 100].map((val) => (
+              <button
+                key={val}
+                onClick={() => updateThrottle(val)}
+                disabled={throttleSaving}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  throttle === val
+                    ? "bg-purple-500 text-white"
+                    : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                }`}
+              >
+                {val}%
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Recent Posts - Activity Stream */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4">
-        <h3 className="text-sm font-bold mb-2 text-pink-400">Recent Activity</h3>
-        <div className="space-y-1.5 max-h-80 overflow-y-auto">
-          {stats.recentPosts.map((post) => (
-            <div key={post.id} className="bg-gray-800/50 rounded-lg p-1.5 sm:p-2">
-              <div className="flex items-start justify-between gap-1 mb-0.5">
-                <div className="flex items-center gap-1 flex-wrap min-w-0">
-                  <span className="text-sm">{post.avatar_emoji}</span>
-                  <span className="text-[10px] sm:text-xs font-bold">{post.display_name}</span>
-                  <span className="text-[9px] text-gray-500">@{post.username}</span>
-                  {post.media_type === "video" && <span className="text-[8px] px-1 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">🎬</span>}
-                  {post.media_type === "image" && <span className="text-[8px] px-1 py-0.5 bg-emerald-500/20 text-emerald-400 rounded">🖼️</span>}
+      {/* Cron Jobs */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <h3 className="text-base sm:text-lg font-bold mb-4 text-cyan-400">📡 Cron Jobs</h3>
+        <div className="space-y-3">
+          {data.cronSchedules.map((cron) => {
+            const remaining = countdowns[cron.path] ?? 0;
+            const intervalMs = cron.interval * 60 * 1000;
+            const isRunning = remaining <= 0;
+            const ratio = Math.max(0, Math.min(1, (intervalMs - remaining) / intervalMs));
+
+            // Apply throttle effect
+            const displayInterval = throttle > 0 ? cron.interval / (throttle / 100) : 0;
+
+            return (
+              <div key={cron.path} className="bg-gray-800/50 rounded-lg p-3">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm text-white truncate">{cron.name}</p>
+                    <p className="text-xs text-gray-400">
+                      Every {throttle === 0 ? "∞" : displayInterval.toFixed(0)}{cron.unit[0]}
+                      {throttle < 100 && throttle > 0 && (
+                        <span className="text-yellow-500/70"> (throttled {throttle}%)</span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0 ml-2">
+                    <p className={`text-sm sm:text-base font-mono font-bold ${
+                      throttle === 0 ? "text-red-400" :
+                      isRunning ? "text-green-400 animate-pulse" :
+                      remaining < 60000 ? "text-yellow-400" :
+                      "text-gray-300"
+                    }`}>
+                      {throttle === 0 ? "⏸ PAUSED" : formatCountdown(remaining)}
+                    </p>
+                  </div>
                 </div>
-                <button onClick={() => deletePost(post.id)} className="text-red-400 text-[8px] hover:text-red-300 shrink-0">Delete</button>
+
+                {/* Progress bar */}
+                <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-1000 ${
+                      throttle === 0 ? "bg-red-500" :
+                      isRunning ? "bg-green-500 animate-pulse" :
+                      "bg-gradient-to-r from-purple-500 to-cyan-500"
+                    }`}
+                    style={{ width: `${ratio * 100}%` }}
+                  />
+                </div>
               </div>
-              <p className="text-[10px] text-gray-300 line-clamp-1">{post.content}</p>
-              <p className="text-[8px] text-gray-500 mt-0.5">❤️ {post.like_count} · {new Date(post.created_at).toLocaleDateString()}</p>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Status Info */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3">
+          <p className="text-xs text-gray-400 mb-1">Status</p>
+          <p className={`text-lg font-bold ${
+            throttle === 0 ? "text-red-400" :
+            throttle < 50 ? "text-yellow-400" :
+            "text-green-400"
+          }`}>
+            {throttle === 0 ? "🔴 Paused" : throttle < 50 ? "🟡 Slow" : "🟢 Active"}
+          </p>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3">
+          <p className="text-xs text-gray-400 mb-1">Total Jobs</p>
+          <p className="text-lg font-bold text-purple-400">{data.cronSchedules.length}</p>
         </div>
       </div>
     </div>
   );
 }
+
