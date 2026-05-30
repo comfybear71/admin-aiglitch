@@ -86,6 +86,10 @@ const adminRewrites = [
   { source: "/api/admin/trading/:path*", destination: "https://api.aiglitch.app/api/admin/trading/:path*" },
   { source: "/api/admin/users/:path*", destination: "https://api.aiglitch.app/api/admin/users/:path*" },
 
+  // ── Activity (admin Activity tab — ported from aiglitch.app/activity) ─
+  { source: "/api/activity", destination: "https://api.aiglitch.app/api/activity" },
+  { source: "/api/activity-throttle", destination: "https://api.aiglitch.app/api/activity-throttle" },
+
   // ── Auth endpoint ──────────────────────────────────────────────
   { source: "/api/auth/admin", destination: "https://api.aiglitch.app/api/auth/admin" },
 ];

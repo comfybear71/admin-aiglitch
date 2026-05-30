@@ -20,6 +20,26 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-05-30 — Activity tab done right (PR B of 3)
+
+**Goal:** restore the Activity feature the user asked for, but UI-only — no backend code in this repo, no local password validation, all data via strangler-proxy to api.aiglitch.app.
+
+**Shipped:**
+- **`src/app/activity/activity-client.tsx`** — port of `aiglitch/src/app/activity/page.tsx` minus the Phantom wallet auth flow (admin cookie gates the route, no second auth layer). Renders the full legacy rollup: currently-active persona, cron job timers with per-job pause toggles + cost badges, cron execution log, 7-day trend chart, cost breakdown with throttle-savings estimate, activity-level slider, pending video jobs, quick stats, Feed/Topics tabs, 24h chart, source breakdown. Split the 7-day trend chart and cost breakdown into subcomponents (`CronTrendChart`, `CostBreakdown`) so the main file stays scannable.
+- **`src/app/activity/page.tsx`** — Server Component cookie gate + `<ActivityClient />`. Same pattern as `/personas`, `/contacts`, `/cron-runs`, `/status`.
+- **`next.config.ts`** — added `/api/activity` and `/api/activity-throttle` `beforeFiles` proxy rewrites to `api.aiglitch.app`.
+- **`src/app/admin-shell.tsx`** — replaced the header Activity pill (which deep-linked to `aiglitch.app/activity`) with a Sign out button that DELETEs `/api/auth/admin` (proxied to backend) and redirects to `/login`. Feed pill kept.
+- **`src/app/admin-types.ts`** — `Activity` was already in TABS (Haiku/Grok left that bit correct). Kept it. Deliberate divergence from the legacy admin reference, which had Activity as a header pill, not a tab. Justification: user explicitly asked to move Activity into the tab strip so they don't need a separate gate (Phantom QR on the consumer page) to view cron activity.
+
+**Backend dependencies — Sign out + Activity both depend on PR C:**
+- The Sign out button DELETEs `/api/auth/admin`, but `aiglitch-api/src/app/api/auth/admin/route.ts` only exports POST today. Until PR C ships, DELETE will 405 and the cookie won't be invalidated server-side; the local redirect to `/login` will still feel like a logout because the next admin page load will see no cookie (the cookie is set by the backend on POST, so DELETE is the only way to clear it).
+  - **Workaround until PR C:** the cookie is set with `Max-Age=7d`, so the worst-case grace period if Sign out doesn't reach the backend is 7 days. Users who want a hard logout right now can clear their cookies in DevTools.
+- `/api/activity` on aiglitch-api currently returns the wrong shape (a 5-column cron_runs list, not the legacy 12-query rollup the new UI expects) AND is 500ing on prod. The page renders an error card with a Retry button until that ships.
+
+**Branch:** `claude/activity-tab-ui` (off `claude/revert-haiku-grok-damage` until PR A merges, then rebase to master).
+
+---
+
 ### 2026-05-30 — Revert Haiku/Grok damage (PR A of 3)
 
 **Symptom user reported:** `admin.aiglitch.app/activity` returned "Error: API error: 500" and the user noted "we are working on haiku and Grok and they have messed up project."

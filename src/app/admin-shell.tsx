@@ -94,12 +94,23 @@ function AdminShellInner({
               >
                 {"\u{1F3E0}"} Feed
               </a>
-              <a
-                href="https://aiglitch.app/activity"
-                className="px-2.5 py-1.5 bg-purple-500/20 text-purple-400 rounded-lg text-xs font-bold hover:bg-purple-500/30 shrink-0"
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await fetch("/api/auth/admin", {
+                      method: "DELETE",
+                      credentials: "include",
+                    });
+                  } catch {
+                    /* network error — fall through to redirect anyway */
+                  }
+                  window.location.href = "/login";
+                }}
+                className="px-2.5 py-1.5 bg-red-500/10 text-red-400 rounded-lg text-xs font-bold hover:bg-red-500/20 shrink-0"
               >
-                {"\u{1F4E1}"} Activity
-              </a>
+                {"\u{1F6AA}"} Sign out
+              </button>
             </div>
           </div>
         </div>
