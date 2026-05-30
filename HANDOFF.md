@@ -20,6 +20,35 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-05-30 — Revert Haiku/Grok damage (PR A of 3)
+
+**Symptom user reported:** `admin.aiglitch.app/activity` returned "Error: API error: 500" and the user noted "we are working on haiku and Grok and they have messed up project."
+
+**Audit findings:**
+- PR #12 added `src/app/api/auth/admin/route.ts` — backend code in a UI-only repo. Violates CLAUDE.md hard rule "No /api/* routes of your own except /api/health".
+- PR #14 removed the `/api/auth/admin` proxy rewrite from `next.config.ts`. Login POSTs now hit the local stub instead of api.aiglitch.app. The local stub uses dummy `safeEqual`/`generateToken` from `admin-auth.ts` (string equality, no HMAC) — so the cookie value is the raw password, not the real token. Backend rejects every subsequent `/api/admin/*` call with 401. **Login silently broken on production unless ADMIN_PASSWORD happened to match by coincidence.**
+- 5 loose commits (`0a7c1cc`, `b4051dd`, `2a5f5fa`, `b7db0dc`, `e4afc0c`) went straight to master with no PR. Violates PR-first rule.
+- `src/app/activity/activity-client.tsx` just dumps raw JSON in a `<pre>` block — nothing like the legacy `aiglitch.app/activity` UI the user asked for.
+- `src/app/admin-shell.tsx` replaced the legacy Feed + Activity header pills with Feed + a red Sign out button. Activity moved into the tab strip (good — user wanted that) but the legacy header had no Sign out.
+
+**Restored to PR #11 baseline (`4bba6bf`):**
+- `next.config.ts` — re-added `/api/auth/admin` proxy rewrite; removed contorted "DELETE handled locally" comment block; removed unused `/api/activity` + `/api/activity-throttle` rewrites (will be re-added in PR B).
+- `src/app/admin-shell.tsx` — back to Feed + Activity pills, no Sign out, no local handleSignOut function.
+- `src/lib/admin-auth.ts` — back to the pre-Haiku state (the dummy `safeEqual`/`generateToken` are still on disk but nothing imports them anymore; per `HANDOFF.md` line 63 they're tagged for deletion in a follow-up).
+
+**Deleted (CLAUDE.md hard-rule violations):**
+- `src/app/api/auth/admin/route.ts` — backend code.
+- `src/app/activity/page.tsx`, `src/app/activity/activity-client.tsx` — placeholder JSON dump, will be ported properly in PR B.
+
+**Outcome:** login should work again immediately on this branch's preview deploy because all `/api/auth/admin` traffic proxies to api.aiglitch.app's real HMAC implementation.
+
+**Up next:**
+- **PR B (this repo):** add `Activity` tab to TABS (between Overview and Daily Briefing), port `aiglitch/src/app/activity/page.tsx` UI verbatim into `src/app/activity/activity-client.tsx`, add `/api/activity` proxy rewrite, wire a Sign out button properly (DELETE `/api/auth/admin` proxied).
+- **PR C (aiglitch-api):** investigate why `aiglitch-api/src/app/api/activity/route.ts` 500s on prod — almost certainly `cron_runs` table missing or schema mismatch. Decide endpoint shape: keep cron-monitor *or* port the legacy 12-query rollup. User chose the legacy consumer feed shape — that's the port target.
+- **PR C prereq (aiglitch-api):** add a `DELETE /api/auth/admin` handler so the Sign out button can actually invalidate the HMAC cookie server-side.
+
+---
+
 ### 2026-05-27 (late evening) — Visual fidelity pass (admin shell + overview dashboard)
 
 **Status:** admin.aiglitch.app now matches the legacy aiglitch.app/admin shell pixel-for-pixel. Header, tab strip, overview dashboard, password gate all ported.

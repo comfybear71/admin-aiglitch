@@ -1,61 +1,29 @@
 /**
- * Admin Authentication — Client Utilities
- * =======================================
- *
- * This file is intended **only** for Client Components ("use client").
- *
- * Never import from this file in:
- * - Server Components
- * - Route Handlers
- * - Server-only modules
- *
- * For Server Components, always use:
- *   import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server"
+ * Admin Authentication — Client-Safe Version
+ * ===========================================
+ * For admin-aiglitch UI only. No server-side dependencies.
+ * Cookie is set by /api/auth/admin route on the backend.
  */
 
 export const ADMIN_COOKIE = "aiglitch-admin-token";
 
 /**
- * Client-side only check for the presence of the admin auth cookie.
- *
- * This function does **not** validate the token. The backend
- * (`aiglitch-api`) validates the token on every protected `/api/admin/*` request.
- *
- * If this function is accidentally called on the server, it will log a warning
- * and return `false`.
+ * Check if admin cookie exists (client-side check).
+ * Note: This doesn't validate the cookie value; it just checks presence.
+ * The backend validates the token when you call protected /api/admin/* routes.
  */
-export function isAdminAuthenticatedClient(): boolean {
-  if (typeof document === "undefined") {
-    console.warn(
-      "isAdminAuthenticatedClient() was called on the server. " +
-        "Use isAdminAuthenticatedServer() from @/lib/admin-auth.server instead."
-    );
-    return false;
-  }
-
-  const cookies = document.cookie.split(";").map((c) => c.trim());
-  return cookies.some((c) => c.startsWith(`${ADMIN_COOKIE}=`));
+export function isAdminAuthenticated(): boolean {
+  if (typeof document === "undefined") return false; // Server-side
+  const cookies = document.cookie.split(";").map(c => c.trim());
+  return cookies.some(c => c.startsWith(`${ADMIN_COOKIE}=`));
 }
 
-/**
- * Alias kept for backward compatibility during the migration.
- * Prefer using `isAdminAuthenticatedClient` explicitly in new client code.
- */
-export const isAdminAuthenticated = isAdminAuthenticatedClient;
-
-/**
- * Temporary dummy implementations.
- *
- * These exist only to keep the login route working during the transition.
- * The real HMAC-based token generation and validation lives in `aiglitch-api`.
- *
- * TODO: Remove these once proper shared auth logic is implemented
- *       (planned for a follow-up PR).
- */
+/** Dummy function for compatibility */
 export function safeEqual(a: string, b: string): boolean {
   return a === b;
 }
 
+/** Dummy function for compatibility */
 export function generateToken(password: string): string {
   return password;
 }
