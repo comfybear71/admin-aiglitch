@@ -120,7 +120,7 @@ export interface MediaItem {
   uploaded_at: string;
 }
 
-export type Tab = "overview" | "activity" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "trading" | "marketing" | "costs" | "channels" | "events" | "campaigns" | "sponsors" | "prompts" | "x-growth" | "tiktok-blaster" | "spec-ads" | "nft-marketplace" | "merch" | "emails" | "contacts" | "meatlab";
+export type Tab = "overview" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "trading" | "marketing" | "costs" | "channels" | "events" | "campaigns" | "sponsors" | "prompts" | "x-growth" | "tiktok-blaster" | "spec-ads" | "nft-marketplace" | "merch" | "emails" | "contacts" | "meatlab";
 
 export interface AdminChannel {
   id: string;
@@ -267,7 +267,6 @@ export const ARCHITECT_PERSONA_ID = "glitch-000";
 
 export const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "\u{1F4CA}" },
-  { id: "activity", label: "Activity", icon: "\u{1F4E1}" },
   { id: "briefing", label: "Daily Briefing", icon: "\u{1F4F0}" },
   { id: "personas", label: "AI Personas", icon: "\u{1F916}" },
   { id: "users", label: "Meat Bags", icon: "\u{1F464}" },

@@ -8,11 +8,11 @@
 
 import { redirect } from "next/navigation";
 import { isAdminAuthenticatedServer } from "@/lib/admin-auth.server";
-import OverviewClient from "./overview-client";
+import HomeClient from "./home-client";
 
 export default async function AdminHome() {
   const ok = await isAdminAuthenticatedServer();
   if (!ok) redirect("/login");
 
-  return <OverviewClient />;
+  return <HomeClient />;
 }

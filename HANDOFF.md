@@ -20,6 +20,37 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-06-01 — Unified Overview dashboard (Overview + Activity merged)
+
+**Goal:** "Best admin overview activity page in the world" (user's words). One condensed page replacing the previous separate Overview (`/`) and Activity (`/activity`), folding in `/api/admin/health` and `/api/admin/migration/metrics` as drillable summary pills, and giving the throttle slider explicit save-state UX it never had.
+
+**Shipped:**
+- **`src/app/home-client.tsx` (new, ~1200 lines)** — single dashboard. Sections in priority order: (1) health pills (DB · Redis · Solana · Anthropic · xAI · Migration) — click any pill → modal with full per-service detail; (2) Right-Now strip (active persona, today's spend, 24h posts); (3) Controls (activity-level slider with optimistic UI + 600ms debounced auto-save + "✓ Saved 5:12pm" indicator + downstream "≈N runs/24h saved" preview; AI Voice Chat toggle with same pattern); (4) consolidated 8-card stats grid (no duplication between previous Overview and Activity); (5) cron timers (one row per job, click to expand last-5 runs inline); (6) interleaved recent-activity feed (posts + cron events sorted by time desc, capped at 30); (7) collapsed Content Composition + Top Personas. Two modals: `HealthDrawer` (5-service detail), `MigrationDrawer` (24h endpoint metrics table).
+- **`src/app/page.tsx`** — swap `OverviewClient` for `HomeClient`.
+- **`src/app/admin-types.ts`** — drop `"activity"` from the `Tab` union and from `TABS` array. Activity is no longer a tab; it's the second-half of Overview.
+- **Deleted:** `src/app/overview-client.tsx`, `src/app/activity/page.tsx`, `src/app/activity/activity-client.tsx` — superseded by `home-client.tsx`.
+
+**Design decisions locked this session:**
+- Slider save UX: optimistic UI + 600ms debounce + status pill cycle (`idle → "Saving…" → "✓ Saved Xpm"`) + downstream effect preview always visible. (User chose Recommended.)
+- `/status` + `/migration` integration: pill strip + click-to-expand modal. Pills are red+animate-pulse only when something's off; click to drill into full detail. Avoids cluttering the dashboard with full health/migration tables. (User chose Recommended.)
+- Recent activity layout: single interleaved feed (posts + cron events). Tells the "what happened in order" story in one column. (User chose Recommended.)
+
+**Duplication removed vs the previous two pages:**
+- "Recent Posts" (Overview) + Activity "Feed" tab → one interleaved feed.
+- "AI Platform Sources" (Overview) + "Content Sources" (Activity) → one panel in collapsed Composition section.
+- 24h posts stat (Activity Quick Stats) + implicit in Overview "Total Posts" → one card in Right Now strip.
+- "Top Personas" leaderboard (Overview) + "Last Active Persona" (Activity) → leaderboard collapsed, last-active in Right Now.
+
+**Notes for future sessions:**
+- TABS now has 22 entries again (back to legacy reference, minus the Activity divergence Haiku/Grok left). `admin-types.ts` is no longer byte-identical to the legacy reference — diff is just the `Activity` removal we made.
+- The "expand on click" for cron timers reads `cronHistory` (already in the `/api/activity` rollup); no extra fetch.
+- Throttle save: if the user moves the slider rapidly, only the final value POSTs (600ms debounce trailing-edge). Last-write-wins.
+- Modals close on Esc, on backdrop click, or on the × button.
+
+**Branch:** `claude/unified-overview-dashboard` (off master).
+
+---
+
 ### 2026-05-30 — Activity tab done right (PR B of 3)
 
 **Goal:** restore the Activity feature the user asked for, but UI-only — no backend code in this repo, no local password validation, all data via strangler-proxy to api.aiglitch.app.
