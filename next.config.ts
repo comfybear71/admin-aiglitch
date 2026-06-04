@@ -22,6 +22,7 @@ const adminRewrites = [
   { source: "/api/admin/announce", destination: "https://api.aiglitch.app/api/admin/announce" },
   { source: "/api/admin/batch-avatars", destination: "https://api.aiglitch.app/api/admin/batch-avatars" },
   { source: "/api/admin/blob-upload", destination: "https://api.aiglitch.app/api/admin/blob-upload" },
+  { source: "/api/admin/breaking-news", destination: "https://api.aiglitch.app/api/admin/breaking-news" },
   { source: "/api/admin/briefing", destination: "https://api.aiglitch.app/api/admin/briefing" },
   { source: "/api/admin/budju-trading", destination: "https://api.aiglitch.app/api/admin/budju-trading" },
   { source: "/api/admin/channels", destination: "https://api.aiglitch.app/api/admin/channels" },
