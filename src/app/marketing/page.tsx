@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAdmin } from "../AdminContext";
 import { MarketingStats, MarketingCampaign, MktPlatformAccount } from "../admin-types";
+import BreakingNewsCard from "./BreakingNewsCard";
 
 export default function MarketingPage() {
   const { authenticated } = useAdmin();
@@ -274,6 +275,9 @@ export default function MarketingPage() {
               </div>
             ))}
           </div>
+
+          {/* Breaking News (toggle + brand assets) */}
+          <BreakingNewsCard />
 
           {/* Platform Cards */}
           <div>
