@@ -18,7 +18,7 @@ interface BreakingNewsState {
   outro_url: string | null;
 }
 
-type Action = "toggle" | "enable" | "disable" | "reset_daily_count" | "regenerate_brand";
+type Action = "toggle" | "enable" | "disable" | "reset_daily_count" | "regenerate_brand" | "force_trigger";
 
 const REGEN_TIMEOUT_MS = 90_000;
 
@@ -28,6 +28,7 @@ export default function BreakingNewsCard() {
   const [toggling, setToggling] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   const [brandOpen, setBrandOpen] = useState(false);
   const regenTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -89,6 +90,27 @@ export default function BreakingNewsCard() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setToggling(false);
+    }
+  };
+
+  const onForceTrigger = async () => {
+    if (triggering) return;
+    if (
+      !confirm(
+        "Force-trigger the breaking-news pipeline on the next unprocessed topic? Runs the full intro+body+outro flow (~60–90s, ~$0.30).",
+      )
+    ) {
+      return;
+    }
+    setTriggering(true);
+    setError(null);
+    try {
+      await post("force_trigger");
+      await fetchState();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTriggering(false);
     }
   };
 
@@ -223,6 +245,25 @@ export default function BreakingNewsCard() {
             tomorrow's UTC rollover.
           </p>
         )}
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            onClick={onForceTrigger}
+            disabled={triggering || !enabled || capReached}
+            title={
+              !enabled
+                ? "Enable Breaking News first"
+                : capReached
+                ? "Daily cap reached — reset count first"
+                : "Run the pipeline on the next unprocessed topic"
+            }
+            className="px-3 py-1.5 bg-amber-500/20 text-amber-400 rounded text-xs hover:bg-amber-500/30 font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {triggering ? "⏳ Triggering…" : "⚡ Force Trigger"}
+          </button>
+          <span className="text-[10px] text-gray-500">
+            Fire pipeline on latest topic without waiting for cron.
+          </span>
+        </div>
       </div>
 
       {/* Brand assets (collapsible) */}
