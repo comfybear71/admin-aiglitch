@@ -18,9 +18,17 @@ interface BreakingNewsState {
   outro_url: string | null;
 }
 
-type Action = "toggle" | "enable" | "disable" | "reset_daily_count" | "regenerate_brand" | "force_trigger";
+type Action =
+  | "toggle"
+  | "enable"
+  | "disable"
+  | "reset_daily_count"
+  | "regenerate_brand"
+  | "force_trigger"
+  | "repair_orphan_posts";
 
 const REGEN_TIMEOUT_MS = 90_000;
+const FORCE_TRIGGER_TIMEOUT_MS = 15 * 60 * 1000; // 15 min — backend maxDuration is 800s
 
 export default function BreakingNewsCard() {
   const [state, setState] = useState<BreakingNewsState | null>(null);
@@ -29,6 +37,9 @@ export default function BreakingNewsCard() {
   const [resetting, setResetting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [triggering, setTriggering] = useState(false);
+  const [triggerPhase, setTriggerPhase] = useState<string>("");
+  const [repairing, setRepairing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [brandOpen, setBrandOpen] = useState(false);
   const regenTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -61,19 +72,31 @@ export default function BreakingNewsCard() {
     };
   }, []);
 
-  const post = useCallback(async (action: Action): Promise<boolean> => {
-    const res = await fetch("/api/admin/breaking-news", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
-    if (res.status === 401) {
-      window.location.href = "/login";
-      return false;
-    }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return true;
-  }, []);
+  const post = useCallback(
+    async <T = unknown,>(
+      action: Action,
+      extras?: Record<string, unknown>,
+      signal?: AbortSignal,
+    ): Promise<T | null> => {
+      const res = await fetch("/api/admin/breaking-news", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...(extras ?? {}) }),
+        signal,
+      });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return null;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      try {
+        return (await res.json()) as T;
+      } catch {
+        return null;
+      }
+    },
+    [],
+  );
 
   const onToggle = async () => {
     if (!state || toggling) return;
@@ -97,20 +120,63 @@ export default function BreakingNewsCard() {
     if (triggering) return;
     if (
       !confirm(
-        "Force-trigger the breaking-news pipeline on the next unprocessed topic? Runs the full intro+body+outro flow (~60–90s, ~$0.30).",
+        "Force-trigger the breaking-news pipeline on the next unprocessed topic? This is SLOW — takes 5–8 minutes. The card will stay locked until it finishes.",
       )
     ) {
       return;
     }
     setTriggering(true);
+    setTriggerPhase("Generating… (5–8 min)");
+    setError(null);
+    const ac = new AbortController();
+    const timeoutId = setTimeout(() => ac.abort(), FORCE_TRIGGER_TIMEOUT_MS);
+    try {
+      await post("force_trigger", { max_topics: 1 }, ac.signal);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      setError(
+        aborted
+          ? "Force Trigger timed out after 15 min — re-checking status to see if it actually completed."
+          : `Force Trigger error: ${msg} — re-checking status anyway.`,
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    // Either way, re-poll to confirm whether count incremented
+    setTriggerPhase("Verifying…");
+    await fetchState();
+    setTriggering(false);
+    setTriggerPhase("");
+  };
+
+  const onRepairOrphans = async () => {
+    if (repairing) return;
+    if (
+      !confirm(
+        "Repair orphan posts? This is a one-shot data fix — only run if something went wrong.",
+      )
+    ) {
+      return;
+    }
+    setRepairing(true);
     setError(null);
     try {
-      await post("force_trigger");
+      const result = await post<{ repaired?: number; post_ids?: string[] }>(
+        "repair_orphan_posts",
+      );
+      const n = result?.repaired ?? 0;
+      setToast(
+        n === 0
+          ? "No orphans found — nothing to repair."
+          : `Repaired ${n} orphan post${n === 1 ? "" : "s"}.`,
+      );
+      setTimeout(() => setToast(null), 6000);
       await fetchState();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setTriggering(false);
+      setRepairing(false);
     }
   };
 
@@ -258,10 +324,12 @@ export default function BreakingNewsCard() {
             }
             className="px-3 py-1.5 bg-amber-500/20 text-amber-400 rounded text-xs hover:bg-amber-500/30 font-bold disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {triggering ? "⏳ Triggering…" : "⚡ Force Trigger"}
+            {triggering ? `⏳ ${triggerPhase || "Triggering…"}` : "⚡ Force Trigger"}
           </button>
           <span className="text-[10px] text-gray-500">
-            Fire pipeline on latest topic without waiting for cron.
+            {triggering
+              ? "Card locked until pipeline finishes (~5–8 min)."
+              : "Fire pipeline on latest topic without waiting for cron. Slow (5–8 min)."}
           </span>
         </div>
       </div>
@@ -305,14 +373,24 @@ export default function BreakingNewsCard() {
       </div>
 
       {/* Footer actions */}
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <button
-          onClick={onReset}
-          disabled={resetting}
-          className="px-2.5 py-1 bg-gray-800 text-gray-300 rounded text-[11px] hover:bg-gray-700 disabled:opacity-50"
-        >
-          {resetting ? "Resetting…" : "🔄 Reset daily count"}
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onReset}
+            disabled={resetting}
+            className="px-2.5 py-1 bg-gray-800 text-gray-300 rounded text-[11px] hover:bg-gray-700 disabled:opacity-50"
+          >
+            {resetting ? "Resetting…" : "🔄 Reset daily count"}
+          </button>
+          <button
+            onClick={onRepairOrphans}
+            disabled={repairing}
+            title="One-shot data fix — only run if a previous trigger left a post without its associated video."
+            className="px-2.5 py-1 bg-gray-800 text-gray-500 rounded text-[11px] hover:bg-gray-700 hover:text-gray-300 disabled:opacity-50"
+          >
+            {repairing ? "Repairing…" : "🔧 Repair orphan posts"}
+          </button>
+        </div>
         {error && (
           <span
             className="text-[10px] text-red-400 truncate max-w-[50%]"
@@ -322,6 +400,12 @@ export default function BreakingNewsCard() {
           </span>
         )}
       </div>
+
+      {toast && (
+        <div className="mt-1 px-3 py-2 bg-green-500/10 border border-green-500/30 text-green-400 rounded text-xs font-bold">
+          ✓ {toast}
+        </div>
+      )}
     </div>
   );
 }
