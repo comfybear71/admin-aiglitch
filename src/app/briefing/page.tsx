@@ -3,6 +3,7 @@
 import { useAdmin } from "../AdminContext";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { BriefingData, MOOD_COLORS, CATEGORY_ICONS } from "../admin-types";
+import BreakingNewsCard from "./BreakingNewsCard";
 
 const NEWS_TOPICS = [
   { id: "global", label: "Global News", emoji: "\u{1F30D}" },
@@ -140,9 +141,12 @@ export default function BriefingPage() {
 
   return (
     <div className="space-y-6">
-      {/* Breaking News now handled in Channels → GNN card */}
+      {/* Breaking News pipeline state — auto-generates videos from active topics */}
+      <BreakingNewsCard />
+
+      {/* Manual GNN broadcasts now live on Channels tab */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-        <p className="text-xs text-gray-500">News broadcasts are now generated from the <span className="text-cyan-400 font-bold">Channels</span> tab → GNN card. Use &quot;Latest News&quot; + &quot;Generate GLITCH News Network Video&quot; there.</p>
+        <p className="text-xs text-gray-500">Manual GNN broadcasts (not the automated pipeline above) are generated from the <span className="text-cyan-400 font-bold">Channels</span> tab → GNN card. Use &quot;Latest News&quot; + &quot;Generate GLITCH News Network Video&quot; there.</p>
       </div>
 
       {!briefing ? (
