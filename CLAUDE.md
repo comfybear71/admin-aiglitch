@@ -99,3 +99,75 @@ Before answering ANY question, read these first:
 ## Owner
 
 Stuart French (comfybear71) — solo developer. Works from PC, iPad, and phone. Drives all merges and release tags via GitHub web UI.
+
+## Rule 5 — PR handoff format (MANDATORY)
+
+When a branch is ready to ship, deliver the handoff in this EXACT format.
+Every section must be copy-paste ready for GitHub's UI.
+
+### 1. Compare URL
+Plain text, clickable:
+`https://github.com/comfybear71/<REPO>/compare/master...claude/<BRANCH>`
+
+### 2. PR Title
+Inside a code block, one line, max 70 chars.
+
+### 3. PR Description
+Inside a markdown code block with this structure:
+
+    ## Summary
+    <1-3 sentence overview of what shipped and why>
+
+    ## Changes
+    - <file path>: <what changed and the reason>
+
+    ## Test plan
+    - [x] Type check passes
+    - [x] <specific tests run>
+    - [ ] <manual verification steps after deploy>
+
+### 4. Merge instructions
+A numbered list with these five steps:
+  1. Open the Compare URL above
+  2. Click "Create pull request"
+  3. Scroll to bottom → ▼ dropdown → "Squash and merge"
+  4. Click "Confirm squash and merge"
+  5. Click "Delete branch"
+
+### 5. Release tag (MANDATORY — every PR gets a tag, no exceptions)
+A table:
+
+  | Field        | Value                                                  |
+  |--------------|--------------------------------------------------------|
+  | Tag name     | v<semver>-<YYYY-MM-DD>                                 |
+  | Target       | master                                                 |
+  | Title        | v<semver> — <short title>                              |
+  | Create via   | https://github.com/comfybear71/<REPO>/releases/new     |
+
+Then the tag description in a markdown code block:
+
+    ## v<semver>
+
+    ### New
+    - <what shipped that's brand new>
+
+    ### Fixed
+    - <bug fixes>
+
+    ### Changed
+    - <behavioral changes>
+
+Tag naming rules:
+  - Patch: v1.2.3   (bug fix, no new behavior)
+  - Minor: v1.3.0   (new feature, backwards compatible)
+  - Major: v2.0.0   (breaking change)
+  - Docs:  v1.2.3-docs   (docs-only)
+  - Recovery: v1.2.3-recovery   (revert / hotfix-rollback)
+
+Other rules:
+  - Check existing tags first (`git tag --list`) so you pick the next number.
+  - Never create the tag yourself — only suggest it. I create it via the
+    GitHub UI.
+  - Push commits before delivering the handoff. The Compare URL must work.
+  - Re-read this pinned section before writing each handoff. Do not
+    reconstruct from memory.
