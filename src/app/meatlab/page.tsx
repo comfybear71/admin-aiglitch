@@ -220,7 +220,7 @@ export default function MeatLabPage() {
                   )}
                   {(sub.creator_username || sub.user_id) && (
                     <a
-                      href={`${CONSUMER_URL}/meatlab/${(sub.creator_username || sub.user_id || "").toLowerCase()}`}
+                      href={`${CONSUMER_URL}/me/${(sub.creator_username || sub.user_id || "").toLowerCase()}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[10px] text-green-400 hover:underline"
