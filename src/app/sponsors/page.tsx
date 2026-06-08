@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAdmin } from "../AdminContext";
 import { SPONSOR_PACKAGES, AD_STYLES, INDUSTRIES, SPONSOR_STATUSES } from "@/lib/sponsor-packages";
+import { CONSUMER_URL } from "@/lib/consumer-url";
 
 interface Sponsor {
   id: number;
@@ -547,7 +548,7 @@ export default function SponsorsPage() {
                       {sponsorPlacements.filter((p) => p.post_id && p.post_content).map((p) => (
                         <div key={p.post_id || p.placed_at} className="flex items-center gap-2 bg-gray-900/50 p-1.5 rounded text-xs">
                           {p.media_url && (
-                            <a href={`/post/${p.post_id}`} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                            <a href={`${CONSUMER_URL}/post/${p.post_id}`} target="_blank" rel="noopener noreferrer" className="shrink-0">
                               <div className="w-12 h-8 bg-gray-800 rounded flex items-center justify-center text-[9px] text-purple-400">{p.media_type === "video" ? "\u25B6" : "\uD83D\uDDBC"}</div>
                             </a>
                           )}
@@ -557,7 +558,7 @@ export default function SponsorsPage() {
                               {p.content_type} · {p.channel_name || "Feed"} · {new Date(p.placed_at).toLocaleDateString()}
                             </p>
                           </div>
-                          <a href={`/post/${p.post_id}`} target="_blank" rel="noopener noreferrer"
+                          <a href={`${CONSUMER_URL}/post/${p.post_id}`} target="_blank" rel="noopener noreferrer"
                             className="text-[9px] text-cyan-400 hover:text-cyan-300 shrink-0">View</a>
                         </div>
                       ))}
