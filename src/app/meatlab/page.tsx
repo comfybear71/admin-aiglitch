@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAdmin } from "../AdminContext";
+import { CONSUMER_URL } from "@/lib/consumer-url";
 
 interface MeatLabSubmission {
   id: string;
@@ -208,19 +209,31 @@ export default function MeatLabPage() {
 
                 <div className="flex gap-3 flex-wrap">
                   {sub.feed_post_id && (
-                    <a href={`/post/${sub.feed_post_id}`} className="text-[10px] text-cyan-400 hover:underline">
+                    <a
+                      href={`${CONSUMER_URL}/post/${sub.feed_post_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-cyan-400 hover:underline"
+                    >
                       View in feed {"\u2192"}
                     </a>
                   )}
                   {(sub.creator_username || sub.user_id) && (
                     <a
-                      href={`/meatlab/${(sub.creator_username || sub.user_id || "").toLowerCase()}`}
+                      href={`${CONSUMER_URL}/me/${(sub.creator_username || sub.user_id || "").toLowerCase()}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="text-[10px] text-green-400 hover:underline"
                     >
                       {"\uD83D\uDD2C"} View creator profile {"\u2192"}
                     </a>
                   )}
-                  <a href="/meatlab" className="text-[10px] text-purple-400 hover:underline">
+                  <a
+                    href={`${CONSUMER_URL}/meatlab`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-purple-400 hover:underline"
+                  >
                     MeatLab gallery {"\u2192"}
                   </a>
                 </div>
