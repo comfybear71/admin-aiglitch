@@ -27,6 +27,23 @@ type Action =
   | "force_trigger"
   | "repair_orphan_posts";
 
+/** Per-topic outcome returned by the backend `force_trigger` action. */
+interface ForceTriggerResult {
+  topic_id: string;
+  status: "posted" | "skipped" | "failed" | "cap_hit" | "disabled";
+  video_url?: string;
+  post_id?: string;
+  error?: string;
+}
+
+interface ForceTriggerResponse {
+  ok?: boolean;
+  results?: ForceTriggerResult[];
+}
+
+/** Inline feedback banner shown after a Force Trigger run. */
+type TriggerFeedback = { kind: "success" | "warn" | "error"; msg: string };
+
 const REGEN_TIMEOUT_MS = 90_000;
 const FORCE_TRIGGER_TIMEOUT_MS = 15 * 60 * 1000; // 15 min — backend maxDuration is 800s
 
@@ -38,6 +55,7 @@ export default function BreakingNewsCard() {
   const [regenerating, setRegenerating] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [triggerPhase, setTriggerPhase] = useState<string>("");
+  const [triggerFeedback, setTriggerFeedback] = useState<TriggerFeedback | null>(null);
   const [repairing, setRepairing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [brandOpen, setBrandOpen] = useState(false);
@@ -88,7 +106,18 @@ export default function BreakingNewsCard() {
         window.location.href = "/login";
         return null;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // Surface the backend's error message (e.g. {"error": "..."}) rather
+        // than a bare status code, so the UI can show what actually went wrong.
+        let detail = `HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body?.error) detail = `${body.error} (HTTP ${res.status})`;
+        } catch {
+          /* non-JSON error body — keep the status code */
+        }
+        throw new Error(detail);
+      }
       try {
         return (await res.json()) as T;
       } catch {
@@ -128,18 +157,26 @@ export default function BreakingNewsCard() {
     setTriggering(true);
     setTriggerPhase("Generating… (5–8 min)");
     setError(null);
+    setTriggerFeedback(null);
     const ac = new AbortController();
     const timeoutId = setTimeout(() => ac.abort(), FORCE_TRIGGER_TIMEOUT_MS);
     try {
-      await post("force_trigger", { max_topics: 1 }, ac.signal);
+      const data = await post<ForceTriggerResponse>(
+        "force_trigger",
+        { max_topics: 1 },
+        ac.signal,
+      );
+      // 401 → post() already redirected; data is null, nothing to report.
+      if (data) setTriggerFeedback(summarizeForceTrigger(data.results ?? []));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const aborted = err instanceof DOMException && err.name === "AbortError";
-      setError(
-        aborted
-          ? "Force Trigger timed out after 15 min — re-checking status to see if it actually completed."
-          : `Force Trigger error: ${msg} — re-checking status anyway.`,
-      );
+      setTriggerFeedback({
+        kind: "error",
+        msg: aborted
+          ? "Force Trigger timed out after 15 min — re-checking status to confirm whether it actually completed."
+          : `Force Trigger failed: ${msg}`,
+      });
     } finally {
       clearTimeout(timeoutId);
     }
@@ -332,6 +369,33 @@ export default function BreakingNewsCard() {
               : "Fire pipeline on latest topic without waiting for cron. Slow (5–8 min)."}
           </span>
         </div>
+        {triggerFeedback && !triggering && (
+          <div
+            className={`mt-2 px-3 py-2 rounded text-xs font-bold border flex items-start justify-between gap-2 ${
+              triggerFeedback.kind === "success"
+                ? "bg-green-500/10 border-green-500/30 text-green-400"
+                : triggerFeedback.kind === "error"
+                ? "bg-red-500/10 border-red-500/30 text-red-400"
+                : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+            }`}
+          >
+            <span>
+              {triggerFeedback.kind === "success"
+                ? "✓ "
+                : triggerFeedback.kind === "error"
+                ? "⚠️ "
+                : "ℹ️ "}
+              {triggerFeedback.msg}
+            </span>
+            <button
+              onClick={() => setTriggerFeedback(null)}
+              className="text-gray-500 hover:text-gray-300 shrink-0"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Brand assets (collapsible) */}
@@ -408,6 +472,51 @@ export default function BreakingNewsCard() {
       )}
     </div>
   );
+}
+
+/**
+ * Turn the backend `force_trigger` results into a single human-readable
+ * banner. The backend returns 200 even when nothing happened (empty
+ * results = no unprocessed topics, or per-topic skipped/cap_hit/disabled),
+ * so we MUST inspect the body — a bare HTTP-ok check shows the user nothing.
+ */
+function summarizeForceTrigger(results: ForceTriggerResult[]): TriggerFeedback {
+  if (results.length === 0) {
+    return {
+      kind: "warn",
+      msg: "Nothing to trigger — every active topic already has a breaking-news video. Wait for a fresh daily topic (see Daily Briefing) and try again.",
+    };
+  }
+
+  const posted = results.filter((r) => r.status === "posted").length;
+  if (posted > 0) {
+    return {
+      kind: "success",
+      msg: `Generated ${posted} breaking-news video${posted === 1 ? "" : "s"}.`,
+    };
+  }
+
+  if (results.some((r) => r.status === "disabled")) {
+    return { kind: "warn", msg: "Breaking News is disabled — enable it first, then trigger." };
+  }
+  if (results.some((r) => r.status === "cap_hit")) {
+    return {
+      kind: "warn",
+      msg: "Daily cap reached — reset the count or wait for tomorrow's UTC rollover.",
+    };
+  }
+
+  const failed = results.find((r) => r.status === "failed");
+  if (failed) {
+    return { kind: "error", msg: `Generation failed: ${failed.error || "unknown error"}` };
+  }
+
+  const skipped = results.find((r) => r.status === "skipped");
+  if (skipped) {
+    return { kind: "warn", msg: `Topic skipped: ${skipped.error || "no reason given"}` };
+  }
+
+  return { kind: "warn", msg: `Finished with status "${results[0].status}".` };
 }
 
 function AssetRow({ label, url }: { label: string; url: string | null }) {
