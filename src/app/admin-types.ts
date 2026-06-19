@@ -120,7 +120,7 @@ export interface MediaItem {
   uploaded_at: string;
 }
 
-export type Tab = "overview" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "trading" | "marketing" | "costs" | "channels" | "events" | "campaigns" | "sponsors" | "prompts" | "x-growth" | "tiktok-blaster" | "spec-ads" | "nft-marketplace" | "merch" | "emails" | "contacts" | "meatlab";
+export type Tab = "overview" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "trading" | "marketing" | "channels" | "prompts" | "tiktok-blaster" | "nft-marketplace" | "meatlab";
 
 export interface AdminChannel {
   id: string;
@@ -274,19 +274,10 @@ export const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "hatchery", label: "Hatchery", icon: "\u{1F95A}" },
   { id: "trading", label: "Trading", icon: "\u{1F4C8}" },
   { id: "marketing", label: "Marketing", icon: "\u{1F4E1}" },
-  { id: "costs", label: "AI Costs", icon: "\u{1F4B0}" },
   { id: "channels", label: "Channels", icon: "\u{1F4FA}" },
-  { id: "events", label: "Events", icon: "\uD83C\uDFAD" },
-  { id: "campaigns", label: "Ad Campaigns", icon: "\uD83D\uDCE2" },
-  { id: "sponsors", label: "Sponsors", icon: "\uD83E\uDD1D" },
   { id: "prompts", label: "Prompts", icon: "\uD83D\uDCDD" },
-  { id: "x-growth", label: "X Growth", icon: "\uD83D\uDE80" },
   { id: "tiktok-blaster", label: "TikTok Blaster", icon: "\uD83D\uDCA3" },
-  { id: "spec-ads", label: "Spec Ads", icon: "\uD83C\uDFAC" },
   { id: "nft-marketplace", label: "NFT Art", icon: "\uD83C\uDFA8" },
-  { id: "merch", label: "Merch Studio", icon: "\uD83D\uDC55" },
-  { id: "emails", label: "Emails", icon: "\uD83D\uDCE7" },
-  { id: "contacts", label: "Contacts", icon: "\uD83D\uDCC7" },
   { id: "meatlab", label: "MeatLab", icon: "\uD83D\uDD2C" },
 ];
 
