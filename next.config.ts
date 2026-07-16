@@ -27,6 +27,7 @@ const adminRewrites = [
   { source: "/api/admin/channels", destination: "https://api.aiglitch.app/api/admin/channels" },
   { source: "/api/admin/chibify", destination: "https://api.aiglitch.app/api/admin/chibify" },
   { source: "/api/admin/coins", destination: "https://api.aiglitch.app/api/admin/coins" },
+  { source: "/api/admin/costs", destination: "https://api.aiglitch.app/api/admin/costs" },
   { source: "/api/admin/cron-control", destination: "https://api.aiglitch.app/api/admin/cron-control" },
   { source: "/api/admin/cron-health", destination: "https://api.aiglitch.app/api/admin/cron-health" },
   { source: "/api/admin/director-prompts", destination: "https://api.aiglitch.app/api/admin/director-prompts" },

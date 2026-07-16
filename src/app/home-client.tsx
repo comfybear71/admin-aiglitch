@@ -1,24 +1,16 @@
 "use client";
 
 /**
- * Admin Home — unified Overview + Activity dashboard.
+ * Admin Home — operator cockpit (Overview).
  *
- * One page, six concerns, ranked top→bottom by what an admin needs
- * to see first:
- *   1. Health pills (DB, Redis, Solana, Anthropic, xAI, Migration)
- *      — click any pill to drill into /api/admin/health or
- *      /api/admin/migration/metrics in a modal.
- *   2. Right-Now strip — currently-active persona, today's spend,
- *      24h posts.
- *   3. Controls — Activity Level slider + AI Voice Chat toggle,
- *      both auto-saved with an explicit "✓ Saved 5:12pm" indicator.
- *   4. Stats grid — 8 condensed cards, no duplication.
- *   5. Cron timers — one row per job, click to expand recent runs.
- *   6. Recent activity — interleaved feed of posts + cron events.
- *   7. Content composition + Top personas — collapsed by default.
- *
- * Replaces the previous Overview (`/`) and Activity (`/activity`)
- * pages. The old Activity tab is dropped from TABS.
+ * Glanceable zones, top → bottom:
+ *   1. Health — DB, Redis, Anthropic, xAI (connectivity pills)
+ *   2. Money + kill switch — AI ledger spend (24h) + Activity Level + voice
+ *   3. Pulse — last active persona + 24h posts
+ *   4. Stats grid — platform counts
+ *   5. Cron timers — pause controls for expensive jobs
+ *   6. Recent activity feed
+ *   7. Content composition + Top personas — collapsed by default
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,28 +29,38 @@ interface HealthResponse {
   services: Record<string, ServiceCheck>;
 }
 
-interface MigrationMetricRow {
-  path: string;
-  method_set: string;
-  total: number;
-  ok: number;
-  errors: number;
-  unknown: number;
-  error_rate: number;
-  p50_ms: number | null;
-  p95_ms: number | null;
-  last_at: string;
+interface CostHistoryRow {
+  date: string;
+  provider: string;
+  task_type: string;
+  total_usd: string | number;
+  count: number;
 }
 
-interface MigrationMetricsResponse {
-  summary: {
-    window: string;
-    endpoint_count: number;
-    total_calls: number;
-    total_errors: number;
-    total_unknown: number;
+interface CostsResponse {
+  history: CostHistoryRow[];
+  days: number;
+}
+
+/** Rolling 24h AI spend from ai_cost_log (xAI + Anthropic only). */
+function sumAiSpend24h(history: CostHistoryRow[]): {
+  total: number;
+  xai: number;
+  anthropic: number;
+} {
+  let xai = 0;
+  let anthropic = 0;
+  for (const row of history) {
+    const usd = Number(row.total_usd) || 0;
+    const p = (row.provider || "").toLowerCase();
+    if (p === "anthropic" || p === "claude") anthropic += usd;
+    else if (p === "xai" || p.startsWith("grok")) xai += usd;
+  }
+  return {
+    total: Math.round((xai + anthropic) * 100) / 100,
+    xai: Math.round(xai * 100) / 100,
+    anthropic: Math.round(anthropic * 100) / 100,
   };
-  metrics: MigrationMetricRow[];
 }
 
 interface CronSchedule {
@@ -200,10 +202,12 @@ function getPostTypeEmoji(type: string): string {
 const SERVICE_META: Record<string, { emoji: string; label: string; description: string }> = {
   database: { emoji: "🗄️", label: "DB", description: "Neon Postgres — core data store" },
   redis: { emoji: "⚡", label: "Redis", description: "Upstash — cache + circuit breakers" },
-  solana: { emoji: "☀️", label: "Solana", description: "Helius RPC — wallets + §GLITCH" },
   anthropic: { emoji: "🧠", label: "Anthropic", description: "Claude — persona replies" },
   xai: { emoji: "🤖", label: "xAI", description: "Grok — replies + video gen" },
 };
+
+/** Overview health pills — Solana/Migration intentionally omitted. */
+const OVERVIEW_SERVICES = ["database", "redis", "anthropic", "xai"] as const;
 
 const PATH_TO_CRON_NAME: Record<string, string> = {
   "/api/generate-persona-content": "persona-content",
@@ -229,7 +233,7 @@ export default function HomeClient() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [activity, setActivity] = useState<ActivityData | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [migration, setMigration] = useState<MigrationMetricsResponse | null>(null);
+  const [aiSpend, setAiSpend] = useState({ total: 0, xai: 0, anthropic: 0 });
   const [jobPaused, setJobPaused] = useState<Record<string, boolean>>({});
   const [voiceDisabled, setVoiceDisabled] = useState<boolean | null>(null);
 
@@ -239,7 +243,6 @@ export default function HomeClient() {
   const throttleTimer = useRef<NodeJS.Timeout | null>(null);
 
   const [healthOpen, setHealthOpen] = useState(false);
-  const [migrationOpen, setMigrationOpen] = useState(false);
   const [expandedCron, setExpandedCron] = useState<string | null>(null);
   const [showComposition, setShowComposition] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -280,10 +283,12 @@ export default function HomeClient() {
     }
   }, []);
 
-  const fetchMigration = useCallback(async () => {
+  const fetchCosts = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/migration/metrics?since=24h");
-      if (res.ok) setMigration(await res.json());
+      const res = await fetch("/api/admin/costs?days=1");
+      if (!res.ok) return;
+      const d = (await res.json()) as CostsResponse;
+      setAiSpend(sumAiSpend24h(d.history ?? []));
     } catch {
       /* ignore */
     }
@@ -319,20 +324,20 @@ export default function HomeClient() {
       fetchStats(),
       fetchActivity(),
       fetchHealth(),
-      fetchMigration(),
+      fetchCosts(),
       fetchJobStates(),
       fetchSettings(),
     ]);
-  }, [fetchStats, fetchActivity, fetchHealth, fetchMigration, fetchJobStates, fetchSettings]);
+  }, [fetchStats, fetchActivity, fetchHealth, fetchCosts, fetchJobStates, fetchSettings]);
 
-  // Auto-refresh: activity 15s, stats 30s, health 60s, migration 60s
+  // Auto-refresh: activity 15s, stats 30s, health + costs 60s
   useEffect(() => {
     const a = setInterval(fetchActivity, 15_000);
     const s = setInterval(fetchStats, 30_000);
     const h = setInterval(fetchHealth, 60_000);
-    const m = setInterval(fetchMigration, 60_000);
-    return () => { clearInterval(a); clearInterval(s); clearInterval(h); clearInterval(m); };
-  }, [fetchActivity, fetchStats, fetchHealth, fetchMigration]);
+    const c = setInterval(fetchCosts, 60_000);
+    return () => { clearInterval(a); clearInterval(s); clearInterval(h); clearInterval(c); };
+  }, [fetchActivity, fetchStats, fetchHealth, fetchCosts]);
 
   // Countdown ticker
   useEffect(() => {
@@ -430,18 +435,8 @@ export default function HomeClient() {
     [activity],
   );
 
-  const todaysSpend = useMemo(
-    () => activity?.cronCosts?.reduce((s, c) => s + c.cost24h, 0) ?? 0,
-    [activity],
-  );
-
   const todaysThrottledRuns = useMemo(
     () => activity?.cronCosts?.reduce((s, c) => s + c.throttled24h, 0) ?? 0,
-    [activity],
-  );
-
-  const todaysTotalRuns = useMemo(
-    () => activity?.cronCosts?.reduce((s, c) => s + c.runs24h, 0) ?? 0,
     [activity],
   );
 
@@ -466,34 +461,24 @@ export default function HomeClient() {
 
   return (
     <div className="space-y-4">
-      {/* 1. Health pills */}
-      <HealthPills
-        health={health}
-        migration={migration}
-        onOpenHealth={() => setHealthOpen(true)}
-        onOpenMigration={() => setMigrationOpen(true)}
-      />
+      {/* 1. Health */}
+      <HealthPills health={health} onOpenHealth={() => setHealthOpen(true)} />
 
-      {/* 2. Right Now */}
-      <RightNowStrip
-        activity={activity}
-        today24hPosts={today24hPosts}
-        todaysSpend={todaysSpend}
+      {/* 2. Money + kill switch */}
+      <MoneyKillZone
+        aiSpend={aiSpend}
         todaysThrottledRuns={todaysThrottledRuns}
-      />
-
-      {/* 3. Controls */}
-      <ControlsRow
         throttle={throttle}
         throttleSave={throttleSave}
         onThrottleChange={onThrottleChange}
-        todaysThrottledRuns={todaysThrottledRuns}
-        todaysTotalRuns={todaysTotalRuns}
         activeJobsCount={activeJobsCount}
         voiceDisabled={voiceDisabled}
         voiceSave={voiceSave}
         onVoiceToggle={onVoiceToggle}
       />
+
+      {/* 3. Pulse */}
+      <PulseStrip activity={activity} today24hPosts={today24hPosts} />
 
       {/* 4. Stats grid */}
       <StatsGrid stats={stats} activity={activity} />
@@ -530,11 +515,7 @@ export default function HomeClient() {
         <TopPersonasList stats={stats} />
       </CollapsibleSection>
 
-      {/* Modals */}
       {healthOpen && <HealthDrawer health={health} onClose={() => setHealthOpen(false)} />}
-      {migrationOpen && (
-        <MigrationDrawer migration={migration} onClose={() => setMigrationOpen(false)} />
-      )}
     </div>
   );
 }
@@ -543,28 +524,14 @@ export default function HomeClient() {
 
 function HealthPills({
   health,
-  migration,
   onOpenHealth,
-  onOpenMigration,
 }: {
   health: HealthResponse | null;
-  migration: MigrationMetricsResponse | null;
   onOpenHealth: () => void;
-  onOpenMigration: () => void;
 }) {
-  const serviceOrder = ["database", "redis", "solana", "anthropic", "xai"];
-  const migrationOk =
-    migration && migration.summary.total_calls > 0
-      ? migration.summary.total_errors === 0
-      : true;
-  const migrationErrorRate =
-    migration && migration.summary.total_calls > 0
-      ? (migration.summary.total_errors / migration.summary.total_calls) * 100
-      : 0;
-
   return (
     <div className="flex flex-wrap gap-1.5 sm:gap-2">
-      {serviceOrder.map((name) => {
+      {OVERVIEW_SERVICES.map((name) => {
         const meta = SERVICE_META[name];
         const svc = health?.services[name];
         const ok = svc?.status === "ok";
@@ -592,54 +559,171 @@ function HealthPills({
           </button>
         );
       })}
-      <button
-        onClick={onOpenMigration}
-        title="Strangler-proxy endpoint metrics (24h)"
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-bold transition-all ${
-          !migration
-            ? "bg-gray-900 border-gray-800 text-gray-500"
-            : migrationOk
-            ? "bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20"
-            : "bg-red-500/10 border-red-500/40 text-red-400 hover:bg-red-500/20 animate-pulse"
-        }`}
-      >
-        <span>🚦</span>
-        <span>Migration</span>
-        {migration && (
-          <span className="text-[10px] font-mono opacity-70">
-            {migration.summary.total_calls}/{migrationErrorRate.toFixed(1)}%
-          </span>
-        )}
-      </button>
     </div>
   );
 }
 
-// ─── 2. Right Now strip ───────────────────────────────────────────────
+// ─── 2. Money + kill switch ───────────────────────────────────────────
 
-function RightNowStrip({
+function MoneyKillZone({
+  aiSpend,
+  todaysThrottledRuns,
+  throttle,
+  throttleSave,
+  onThrottleChange,
+  activeJobsCount,
+  voiceDisabled,
+  voiceSave,
+  onVoiceToggle,
+}: {
+  aiSpend: { total: number; xai: number; anthropic: number };
+  todaysThrottledRuns: number;
+  throttle: number;
+  throttleSave: SaveState;
+  onThrottleChange: (v: number) => void;
+  activeJobsCount: number;
+  voiceDisabled: boolean | null;
+  voiceSave: SaveState;
+  onVoiceToggle: () => void;
+}) {
+  const spendColor =
+    aiSpend.total > 5
+      ? "text-red-400"
+      : aiSpend.total > 1
+      ? "text-amber-400"
+      : "text-green-400";
+  const skippedPct = 100 - throttle;
+  const sliderColor =
+    throttle === 0
+      ? "#ef4444"
+      : throttle < 30
+      ? "#f97316"
+      : throttle < 70
+      ? "#eab308"
+      : "#22c55e";
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4 space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-1.5 mb-1">
+            <span>💰</span>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+              AI Spend (24h)
+            </span>
+          </div>
+          <div className={`text-3xl font-black font-mono ${spendColor}`}>
+            ${aiSpend.total.toFixed(2)}
+          </div>
+          <div className="text-[10px] text-gray-500 mt-1">
+            xAI ${aiSpend.xai.toFixed(2)} · Anthropic ${aiSpend.anthropic.toFixed(2)}
+            {todaysThrottledRuns > 0 ? ` · ${todaysThrottledRuns} runs throttled` : ""}
+          </div>
+        </div>
+        {throttle === 0 && (
+          <div className="text-[11px] text-red-400 font-bold">
+            Kill switch on — jobs paused
+          </div>
+        )}
+      </div>
+
+      <div className="pt-3 border-t border-gray-800">
+        <div className="flex items-center justify-between mb-1.5">
+          <h3 className="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
+            {throttle === 0 ? "⏸️" : throttle < 30 ? "🦥" : throttle < 70 ? "⚡" : "🔥"}{" "}
+            Activity Level
+          </h3>
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-black font-mono" style={{ color: sliderColor }}>
+              {throttle}%
+            </span>
+            <SaveIndicator state={throttleSave} />
+          </div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={throttle}
+          onChange={(e) => onThrottleChange(Number(e.target.value))}
+          className="w-full h-2 rounded-full appearance-none cursor-pointer
+            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:cursor-pointer
+            [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:shadow-lg [&::-moz-range-thumb]:cursor-pointer"
+          style={{
+            background: `linear-gradient(to right, ${sliderColor} 0%, ${sliderColor} ${throttle}%, #1f2937 ${throttle}%, #1f2937 100%)`,
+          }}
+        />
+        <div className="flex justify-between mt-1">
+          <span className="text-[9px] text-gray-600">Paused</span>
+          <span className="text-[9px] text-gray-600">Eco</span>
+          <span className="text-[9px] text-gray-600">Normal</span>
+          <span className="text-[9px] text-gray-600">Full</span>
+        </div>
+        <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+          {throttle === 0 ? (
+            <>
+              <span className="text-red-400 font-bold">All {activeJobsCount} jobs paused.</span>{" "}
+              No new AI costs from gated crons.
+            </>
+          ) : (
+            <>
+              At {throttle}%, ~{skippedPct}% of cron runs will be skipped across{" "}
+              {activeJobsCount} jobs.
+            </>
+          )}
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-800">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-xl">🔊</span>
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-white">AI Voice Chat</div>
+            <div className="text-[11px] text-gray-400 truncate">
+              {voiceDisabled
+                ? "OFF — users can't hear AI personas speak"
+                : "ON — xAI / browser TTS active"}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <SaveIndicator state={voiceSave} />
+          {voiceDisabled !== null && (
+            <button
+              onClick={onVoiceToggle}
+              className={`relative w-12 h-6 rounded-full transition-colors ${
+                voiceDisabled ? "bg-gray-700" : "bg-green-500"
+              }`}
+              aria-label="Toggle AI voice"
+            >
+              <div
+                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                  voiceDisabled ? "left-0.5" : "left-[calc(100%-1.375rem)]"
+                }`}
+              />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 3. Pulse ─────────────────────────────────────────────────────────
+
+function PulseStrip({
   activity,
   today24hPosts,
-  todaysSpend,
-  todaysThrottledRuns,
 }: {
   activity: ActivityData | null;
   today24hPosts: number;
-  todaysSpend: number;
-  todaysThrottledRuns: number;
 }) {
   const cur = activity?.currentlyActive ?? null;
   const lastCron = activity?.lastCronRuns?.[0];
-  const spendColor =
-    todaysSpend > 5
-      ? "text-red-400"
-      : todaysSpend > 1
-      ? "text-amber-400"
-      : "text-green-400";
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
-      {/* Currently active */}
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
       <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 rounded-xl p-3">
         <div className="flex items-center gap-2 mb-1.5">
           <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -670,25 +754,6 @@ function RightNowStrip({
         )}
       </div>
 
-      {/* Today's spend */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <span>💰</span>
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-            Today's Spend
-          </span>
-        </div>
-        <div className={`text-2xl font-black font-mono ${spendColor}`}>
-          ${todaysSpend.toFixed(2)}
-        </div>
-        <div className="text-[10px] text-gray-500 mt-1">
-          {todaysThrottledRuns > 0
-            ? `${todaysThrottledRuns} runs throttled today`
-            : "no throttling today"}
-        </div>
-      </div>
-
-      {/* 24h posts */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
         <div className="flex items-center gap-1.5 mb-1.5">
           <span>📝</span>
@@ -701,139 +766,6 @@ function RightNowStrip({
         </div>
         <div className="text-[10px] text-gray-500 mt-1">
           avg {Math.round(today24hPosts / 24)}/hr
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── 3. Controls ──────────────────────────────────────────────────────
-
-function ControlsRow({
-  throttle,
-  throttleSave,
-  onThrottleChange,
-  todaysThrottledRuns,
-  todaysTotalRuns,
-  activeJobsCount,
-  voiceDisabled,
-  voiceSave,
-  onVoiceToggle,
-}: {
-  throttle: number;
-  throttleSave: SaveState;
-  onThrottleChange: (v: number) => void;
-  todaysThrottledRuns: number;
-  todaysTotalRuns: number;
-  activeJobsCount: number;
-  voiceDisabled: boolean | null;
-  voiceSave: SaveState;
-  onVoiceToggle: () => void;
-}) {
-  const skippedPct = 100 - throttle;
-  const sliderColor =
-    throttle === 0
-      ? "#ef4444"
-      : throttle < 30
-      ? "#f97316"
-      : throttle < 70
-      ? "#eab308"
-      : "#22c55e";
-
-  // Estimate: if currently at throttle T with N runs/24h, at full (100%) we'd
-  // expect N / (T/100) runs. So we save (N / (T/100) - N) runs at current T.
-  const estimatedSavedRuns =
-    throttle > 0 && todaysTotalRuns > 0
-      ? Math.max(0, Math.round(todaysTotalRuns / (throttle / 100) - todaysTotalRuns))
-      : todaysThrottledRuns;
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4 space-y-4">
-      {/* Throttle */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <h3 className="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            {throttle === 0 ? "⏸️" : throttle < 30 ? "🐢" : throttle < 70 ? "⚡" : "🔥"}{" "}
-            Activity Level
-          </h3>
-          <div className="flex items-center gap-3">
-            <span
-              className="text-lg font-black font-mono"
-              style={{ color: sliderColor }}
-            >
-              {throttle}%
-            </span>
-            <SaveIndicator state={throttleSave} />
-          </div>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={throttle}
-          onChange={(e) => onThrottleChange(Number(e.target.value))}
-          className="w-full h-2 rounded-full appearance-none cursor-pointer
-            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:cursor-pointer
-            [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:shadow-lg [&::-moz-range-thumb]:cursor-pointer"
-          style={{
-            background: `linear-gradient(to right, ${sliderColor} 0%, ${sliderColor} ${throttle}%, #1f2937 ${throttle}%, #1f2937 100%)`,
-          }}
-        />
-        <div className="flex justify-between mt-1">
-          <span className="text-[9px] text-gray-600">Paused</span>
-          <span className="text-[9px] text-gray-600">Eco</span>
-          <span className="text-[9px] text-gray-600">Normal</span>
-          <span className="text-[9px] text-gray-600">Full</span>
-        </div>
-        <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
-          {throttle === 0 ? (
-            <>
-              <span className="text-red-400 font-bold">All {activeJobsCount} jobs paused.</span>{" "}
-              No API costs accumulating.
-            </>
-          ) : (
-            <>
-              At {throttle}%, ~{skippedPct}% of cron runs will be skipped.{" "}
-              <span className="text-gray-300 font-semibold">
-                ≈{estimatedSavedRuns} runs/24h saved
-              </span>{" "}
-              across {activeJobsCount} jobs.
-            </>
-          )}
-        </p>
-      </div>
-
-      {/* Voice toggle */}
-      <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-800">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-xl">🔊</span>
-          <div className="min-w-0">
-            <div className="text-sm font-bold text-white">AI Voice Chat</div>
-            <div className="text-[11px] text-gray-400 truncate">
-              {voiceDisabled
-                ? "OFF — users can't hear AI personas speak"
-                : "ON — xAI / browser TTS active"}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <SaveIndicator state={voiceSave} />
-          {voiceDisabled !== null && (
-            <button
-              onClick={onVoiceToggle}
-              className={`relative w-12 h-6 rounded-full transition-colors ${
-                voiceDisabled ? "bg-gray-700" : "bg-green-500"
-              }`}
-              aria-label="Toggle AI voice"
-            >
-              <div
-                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                  voiceDisabled ? "left-0.5" : "left-[calc(100%-1.375rem)]"
-                }`}
-              />
-            </button>
-          )}
         </div>
       </div>
     </div>
@@ -954,7 +886,6 @@ function CronTimers({
           const jobCost = cronName
             ? activity.cronCosts?.find((c) => c.cronName === cronName)
             : undefined;
-          const cost24h = jobCost?.cost24h ?? 0;
           const paused = jobPaused[cronName];
           const isExpanded = expandedCron === cronName;
           const runsForJob = (activity.cronHistory ?? []).filter(
@@ -980,17 +911,6 @@ function CronTimers({
                 />
                 <span className="text-xs sm:text-sm font-semibold text-white min-w-0 truncate">
                   {cron.name}
-                </span>
-                <span
-                  className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
-                    cost24h > 1
-                      ? "bg-red-500/10 text-red-400"
-                      : cost24h > 0.1
-                      ? "bg-amber-500/10 text-amber-400"
-                      : "bg-gray-800 text-gray-500"
-                  }`}
-                >
-                  ${cost24h.toFixed(2)}
                 </span>
                 {lastRun && (
                   <span className="text-[10px] text-gray-500 hidden sm:inline shrink-0">
@@ -1059,16 +979,10 @@ function CronTimers({
                         {cron.unit[0]} at {throttle}%
                       </span>
                     )}
-                    {jobCost && (
-                      <span className="text-gray-600">
+                    {jobCost && jobCost.throttled7d > 0 && (
+                      <span className="text-yellow-500">
                         {" "}
-                        · 7d ${jobCost.cost7d.toFixed(2)} · {jobCost.runs7d} runs
-                        {jobCost.throttled7d > 0 && (
-                          <span className="text-yellow-500">
-                            {" "}
-                            · {jobCost.throttled7d} throttled
-                          </span>
-                        )}
+                        · {jobCost.throttled7d} throttled (7d)
                       </span>
                     )}
                   </div>
@@ -1078,9 +992,9 @@ function CronTimers({
                       className="flex items-center gap-2 text-[11px] py-1"
                     >
                       <span className="w-4">
-                        {r.status === "completed"
+                        {r.status === "completed" || r.status === "ok"
                           ? "✅"
-                          : r.status === "failed"
+                          : r.status === "failed" || r.status === "error"
                           ? "❌"
                           : r.status === "throttled"
                           ? "⏭️"
@@ -1088,9 +1002,9 @@ function CronTimers({
                       </span>
                       <span
                         className={`font-mono ${
-                          r.status === "completed"
+                          r.status === "completed" || r.status === "ok"
                             ? "text-green-400"
-                            : r.status === "failed"
+                            : r.status === "failed" || r.status === "error"
                             ? "text-red-400"
                             : "text-gray-500"
                         }`}
@@ -1440,7 +1354,9 @@ function HealthDrawer({
             </div>
           </div>
           <div className="space-y-2">
-            {Object.entries(health.services).map(([name, svc]) => {
+            {OVERVIEW_SERVICES.map((name) => {
+              const svc = health.services[name];
+              if (!svc) return null;
               const meta = SERVICE_META[name];
               const ok = svc.status === "ok";
               const latColor =
@@ -1486,94 +1402,6 @@ function HealthDrawer({
                 </div>
               );
             })}
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function MigrationDrawer({
-  migration,
-  onClose,
-}: {
-  migration: MigrationMetricsResponse | null;
-  onClose: () => void;
-}) {
-  return (
-    <Modal title="🚦 Strangler Migration — Endpoint Metrics (24h)" onClose={onClose}>
-      {!migration ? (
-        <div className="text-sm text-gray-400 animate-pulse">Loading…</div>
-      ) : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 text-center">
-              <div className="text-2xl font-black font-mono text-cyan-400">
-                {migration.summary.endpoint_count}
-              </div>
-              <div className="text-[10px] text-gray-500 uppercase mt-0.5">Endpoints</div>
-            </div>
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 text-center">
-              <div className="text-2xl font-black font-mono text-purple-400">
-                {migration.summary.total_calls.toLocaleString()}
-              </div>
-              <div className="text-[10px] text-gray-500 uppercase mt-0.5">Calls</div>
-            </div>
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 text-center">
-              <div
-                className={`text-2xl font-black font-mono ${
-                  migration.summary.total_errors > 0 ? "text-red-400" : "text-green-400"
-                }`}
-              >
-                {migration.summary.total_errors}
-              </div>
-              <div className="text-[10px] text-gray-500 uppercase mt-0.5">Errors</div>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px]">
-              <thead className="text-gray-500 uppercase text-[9px] border-b border-gray-800">
-                <tr>
-                  <th className="text-left py-2 pr-2">Path</th>
-                  <th className="text-left py-2 pr-2">Methods</th>
-                  <th className="text-right py-2 pr-2">Total</th>
-                  <th className="text-right py-2 pr-2">Errors</th>
-                  <th className="text-right py-2 pr-2">p50</th>
-                  <th className="text-right py-2 pr-2">p95</th>
-                  <th className="text-right py-2">Last</th>
-                </tr>
-              </thead>
-              <tbody className="font-mono">
-                {migration.metrics.map((m) => (
-                  <tr
-                    key={m.path}
-                    className="border-b border-gray-800/40 hover:bg-gray-800/30"
-                  >
-                    <td className="py-1.5 pr-2 text-gray-200 truncate max-w-[260px]">
-                      {m.path}
-                    </td>
-                    <td className="py-1.5 pr-2 text-gray-400 text-[10px]">{m.method_set}</td>
-                    <td className="py-1.5 pr-2 text-right text-white">{m.total}</td>
-                    <td
-                      className={`py-1.5 pr-2 text-right ${
-                        m.errors > 0 ? "text-red-400 font-bold" : "text-gray-600"
-                      }`}
-                    >
-                      {m.errors}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right text-gray-400">
-                      {m.p50_ms ? `${m.p50_ms}ms` : "—"}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right text-gray-400">
-                      {m.p95_ms ? `${m.p95_ms}ms` : "—"}
-                    </td>
-                    <td className="py-1.5 text-right text-gray-600 text-[10px]">
-                      {timeAgo(m.last_at)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         </div>
       )}
