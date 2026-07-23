@@ -20,6 +20,137 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-07-22 — Admin tab strip complete; Trade button on roadmap; next = marketing
+
+**Status:** User signed off admin page work ("that is it for admin page"). **Next focus:** `marketing-aiglitch` (not admin-aiglitch).
+
+**Admin tab strip — done (local / pending PR):**
+| Tab | Status |
+|---|---|
+| Overview, Briefing, Personas, Meat Bags, Posts, Hatchery | ✅ |
+| Channels, Prompts, TikTok Blaster, MeatLab, NFT Art | ✅ |
+| Trading | ⏳ **stays in tab strip for now** — moves to `trade.aiglitch.app` later |
+| Marketing | ⏳ **remove from tab strip post-PR** — sidebar link to `marketing.aiglitch.app` already exists |
+
+**Not built yet (roadmap only):**
+- **Trade button** in admin sidebar footer — same pattern as the existing **Marketing** link (`admin-shell.tsx`), but pointing to **`https://trade.aiglitch.app/`** once `trading-aiglitch` ships. Do **not** add until the trading repo is live (dead link otherwise). When added: sits between Marketing and Sign out; opens new tab.
+
+**API shipped (local, uncommitted):** MeatLab pending submissions → Telegram alert (`src/lib/meatlab-notify.ts` + hook on `POST /api/meatlab`).
+
+**Multi-repo sequence locked:**
+1. **Now:** marketing-aiglitch polish / remaining broken pages
+2. **Later:** bootstrap `trading-aiglitch` → `trade.aiglitch.app`
+3. **Then:** remove Trading + NFT Art tabs from admin; add Trade sidebar link; Jupiter-based DEX (see `aiglitch-api/docs/ROADMAP.md` sessions 17–21)
+
+---
+
+### 2026-07-21 — Channels + Autopilot green; Telegram dedupe + sponsor UI deferred
+
+**Status:** Local testing on `admin-aiglitch :3003` → `aiglitch-api :3000`. No PR/commits yet.
+
+**Test results (Channels):**
+| Phase | Result |
+|---|---|
+| Manual AiTunes generate | ✅ Screenplay → 8 clips → stitch → feed → 5 socials |
+| Autopilot ×5 | ✅ All 5 videos stitched + spread (25/25 platform rows in DB) |
+| Telegram | ⚠️ Was double-posting (marketing video + admin summary to same chat) — **fix in API** `spread-post.ts` + single video upload attempt |
+
+**Deferred (logged in `aiglitch-api/docs/ROADMAP.md` § Consumer frontend):**
+- **Sponsor credits on `aiglitch.app` channel player** — products visible in video but yellow "🤝 Sponsors:" row not showing. Consumer UI parser exists; fix at aiglitch.app cutover (caption line and/or API enrichment from `ad_impressions`).
+
+**Still to test before PR:** remaining admin tabs (Prompt, MeatLab, TikTok Blaster, etc.).
+
+---
+
+### 2026-07-21 — Personas page testing: §GLITCH + Ad + Chaos green; multi-repo roadmap locked
+
+**Status:** Local testing on `admin-aiglitch :3003` → `aiglitch-api :3000`. No PR/commits yet — **still more Personas/admin items to test before refactor.**
+
+**Test results (local):**
+| Card | Result |
+|---|---|
+| §GLITCH Coin Promotion | ✅ All 5 platforms |
+| Ad Campaigns (30s Extended) | ✅ All 5 platforms |
+| **Chaos Drops** | ✅ **PASS** — X, Telegram, YouTube, Instagram ✅. Facebook ❌ `Facebook daily post limit reached (10/10 in last 24h)` — **expected throttle**, not a token bug. User setting `FACEBOOK_DAILY_POST_LIMIT=0` locally to disable cap while testing. |
+
+**Shipped (local, uncommitted):**
+- §GLITCH + Ad Campaigns unified UI → `promote-glitchcoin` (async image, 30s stitch fix, spread poll).
+- Maintenance Tools removed from Personas page.
+- Chaos Drops — proxy rewrite, async `jobId`, background spread + `spread_status` poll, platform rows + video preview.
+- Build fix: removed duplicate `summarizeSpreadLog` in `page.tsx` (import from `run-architect-promo` only).
+- **Facebook dual post (API):** Page auto-post ✅. Group is **manual only** (Meta removed Groups API Apr 2024) — yellow reminder note when `FACEBOOK_GROUP_ID` set.
+
+**Deferred:** The Elon Button (no prompt/UI work this stretch). **Chibify** spread + poll — later session (Personas card stays; no spread wiring yet).
+
+---
+
+## Multi-repo roadmap (planning only — no code yet)
+
+User confirmed the 4-app split direction. **Do not start these until Personas/admin testing is fully green + refactor PR.**
+
+| App | Domain | Repo | Status |
+|---|---|---|---|
+| Admin | `admin.aiglitch.app` | `admin-aiglitch` | **Active** — Personas tab testing in progress |
+| Marketing | `marketing.aiglitch.app` | `marketing-aiglitch` | **Live** — Ad Creator, Sponsors, Costs, Events, etc. (screenshot 3) |
+| Consumer | `aiglitch.app` | `aiglitch` | Legacy UI, strangler to API |
+| **Trading** | **`trade.aiglitch.app`** | **`trading-aiglitch`** *(future)* | **Not started** — Trading + NFT Art tabs move here |
+
+### `trade.aiglitch.app` — locked product spec (2026-07-22, planning only)
+
+User confirmed direction for the future trading sister app:
+
+| Piece | Spec |
+|---|---|
+| **Tabs** | **Trading** (persona wallets, BUDJU bot, memos — ported from admin) + **NFT Art** (Grokify marketplace — ported from admin) |
+| **DEX** | Real on-chain trading via **Jupiter APIs** — our own decentralized trading UI, not a mock dashboard |
+| **GLITCH + BUDJU pools** | **We control the pools.** Tokens are **buy-only** until platform treasury reaches **5,000 SOL**, then become **fully tradeable** (sell + swap) |
+| **Admin nav** | When live: add **Trade** sidebar button (same footer pattern as Marketing → external link). Remove in-tab **Trading** + **NFT Art** from `admin-aiglitch` |
+
+Per `aiglitch-api` CLAUDE.md decision #6: every on-chain / trading **API endpoint** still needs explicit written confirmation before it ships — frontend split is separate.
+
+### Planned admin tab removals (after testing green)
+
+1. **Remove Marketing tab/page from `admin-aiglitch`** — marketing tooling already lives in `marketing-aiglitch`. Admin tab is redundant; replace with external link to `https://marketing.aiglitch.app` (or remove tab entirely). Several routes already redirect in `next.config.ts` (`/sponsors`, `/costs`, `/events`, etc. → marketing domain).
+2. **Remove Trading + NFT Art tabs from `admin-aiglitch`** — when `trading-aiglitch` repo ships at `trade.aiglitch.app`. Same pattern as marketing split: UI-only sister repo, strangler-proxy to `api.aiglitch.app`, no backend duplication. Add **Trade** footer link in `admin-shell.tsx` (mirrors Marketing link).
+
+**Locked decision:** Trading endpoints on API stay gated per `aiglitch-api` CLAUDE.md decision #6 — written confirmation per endpoint during migration. The **frontend split** is separate from API port work.
+
+---
+
+**Roadmap — prompt freshness audit (user flag: prompts becoming stale):**
+Investigate and refresh prompt libraries before they feel repetitive in generated content. Priority review order:
+
+| Pipeline | Canonical prompt file(s) | Admin trigger |
+|---|---|---|
+| §GLITCH + Ad promos | `aiglitch-api/src/app/api/admin/promote-glitchcoin/route.ts` (style directives + random angles) | Personas → §GLITCH / Ad Campaigns |
+| Chaos Drops | `aiglitch-api/src/lib/chaos-drops.ts` (`CHAOS_DROPS`, 100+ scenarios) | Personas → Chaos Drops |
+| Elon campaign | `aiglitch-api` Elon route + admin Personas card | Personas → Elon Button *(deferred)* |
+| Hero / Poster / Sgt Pepper | `aiglitch-api/src/app/api/admin/mktg/route.ts` | Personas cards |
+| Breaking news | `aiglitch-api/src/lib/content/breaking-news.ts` | Briefing tab |
+| Channel videos | `aiglitch-api` channel prompts + `/admin/prompts` overrides | Channels (legacy admin) |
+
+**Operator reference:** `aiglitch-api/docs/PROMPT-MAP.md` — one-page index of every pipeline's edit location.
+
+**Next (before refactor / PR):**
+1. Finish remaining Personas/admin smoke tests (user: "still a lot to do in Admin" — see tab strip: Overview, Briefing, Meat Bags, Posts, Hatchery, Channels, Prompts, TikTok Blaster, MeatLab, etc.)
+2. ~~Facebook Page + Group dual post (`FACEBOOK_GROUP_ID`)~~ — **Page ✅ / Group manual only** (Meta removed Groups API Apr 2024). Yellow admin reminder when env set.
+3. ~~Chibify spread + poll pattern~~ — **deferred to later** (roadmap item; not blocking Personas refactor)
+4. **Admin cleanup (post-test):** remove Marketing tab → link to `marketing.aiglitch.app` only
+5. **Future:** bootstrap `trading-aiglitch` → `trade.aiglitch.app` (Trading + NFT Art tabs)
+6. Prompt freshness audit + Elon Button *(deferred)*
+7. Refactor ~3200-line `personas/page.tsx` + PR both repos when all green
+
+**Local dev reminder:**
+```powershell
+# API
+cd aiglitch-api; npm run dev
+# Admin (separate terminal)
+cd admin-aiglitch; $env:API_PROXY_TARGET="http://localhost:3000"; npm run dev -- -p 3003
+```
+Restart admin after pulling local changes — Maintenance Tools removal won't show until dev server reloads.
+
+---
+
 ### 2026-06-01 — Unified Overview dashboard (Overview + Activity merged)
 
 **Goal:** "Best admin overview activity page in the world" (user's words). One condensed page replacing the previous separate Overview (`/`) and Activity (`/activity`), folding in `/api/admin/health` and `/api/admin/migration/metrics` as drillable summary pills, and giving the throttle slider explicit save-state UX it never had.

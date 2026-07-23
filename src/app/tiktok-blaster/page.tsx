@@ -14,6 +14,7 @@ interface BlasterVideo {
   persona_name: string;
   persona_emoji: string;
   created_at: string;
+  duplicate_count?: number;
   blasted: { blasted_at: string; tiktok_url: string | null } | null;
 }
 
@@ -77,6 +78,111 @@ function makeFilename(content: string, channelName: string): string {
 }
 
 const PAGE_SIZE = 20;
+const SESSION_BLASTED_MEDIA_KEY = "tiktok-blaster-session-media";
+
+function normalizeBlasterTitle(content: string): string {
+  let title = content || "";
+  title = title.replace(/^[^\w]*\s*/, "");
+  const firstLine = title.split("\n")[0] || title;
+  return firstLine.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 120);
+}
+
+function blasterDedupeKeys(mediaUrl: string, content: string): string[] {
+  const keys: string[] = [];
+  const urlKey = normalizeMediaUrl(mediaUrl);
+  const titleKey = normalizeBlasterTitle(content);
+  if (urlKey) keys.push(`url:${urlKey}`);
+  if (titleKey) keys.push(`title:${titleKey}`);
+  return keys;
+}
+
+function videosMatch(a: BlasterVideo, b: BlasterVideo): boolean {
+  if (normalizeMediaUrl(a.media_url) === normalizeMediaUrl(b.media_url)) return true;
+  const titleA = normalizeBlasterTitle(a.content);
+  const titleB = normalizeBlasterTitle(b.content);
+  return titleA.length > 0 && titleA === titleB;
+}
+
+function videoDedupeKey(video: BlasterVideo): string {
+  const titleKey = normalizeBlasterTitle(video.content);
+  return titleKey ? `title:${titleKey}` : `url:${normalizeMediaUrl(video.media_url)}`;
+}
+
+/** Client-side dedupe — matches API so preview deploys help before api.aiglitch.app ships. */
+function dedupeVideosClient(rows: BlasterVideo[]): BlasterVideo[] {
+  if (rows.length === 0) return [];
+  const parent = rows.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]!]!;
+      i = parent[i]!;
+    }
+    return i;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      if (videosMatch(rows[i]!, rows[j]!)) union(i, j);
+    }
+  }
+  const groups = new Map<number, BlasterVideo[]>();
+  for (let i = 0; i < rows.length; i++) {
+    const root = find(i);
+    const list = groups.get(root) ?? [];
+    list.push(rows[i]!);
+    groups.set(root, list);
+  }
+  const out: BlasterVideo[] = [];
+  for (const group of groups.values()) {
+    const sorted = [...group].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+    const pick = sorted[0]!;
+    out.push({ ...pick, duplicate_count: group.length });
+  }
+  return out.sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+}
+
+function loadSessionBlastedMedia(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = sessionStorage.getItem(SESSION_BLASTED_MEDIA_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function normalizeMediaUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`.toLowerCase();
+  } catch {
+    return url.split(/[?#]/)[0]!.toLowerCase();
+  }
+}
+
+function sessionHasVideo(sessionKeys: Set<string>, video: BlasterVideo): boolean {
+  return blasterDedupeKeys(video.media_url, video.content).some((k) => sessionKeys.has(k));
+}
+
+function addVideoToSession(sessionKeys: Set<string>, video: BlasterVideo): Set<string> {
+  const next = new Set(sessionKeys);
+  for (const key of blasterDedupeKeys(video.media_url, video.content)) next.add(key);
+  return next;
+}
+
+function saveSessionBlastedMedia(keys: Set<string>) {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(SESSION_BLASTED_MEDIA_KEY, JSON.stringify([...keys]));
+}
 
 function VideoCard({ video, idx, copiedId, blasting, onCopy, onBlast }: {
   video: BlasterVideo; idx: number; copiedId: string | null; blasting: string | null;
@@ -95,6 +201,9 @@ function VideoCard({ video, idx, copiedId, blasting, onCopy, onBlast }: {
         />
         <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm text-[9px] text-white px-2 py-0.5 rounded-full">
           {video.channel_emoji} {video.channel_name}
+          {(video.duplicate_count ?? 1) > 1 && (
+            <span className="ml-1 text-amber-300">×{video.duplicate_count} posts</span>
+          )}
         </div>
         <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-[9px] text-gray-300 px-2 py-0.5 rounded-full">
           {timeAgo(video.created_at)}
@@ -130,26 +239,32 @@ export default function TikTokBlasterPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
-  const [days, setDays] = useState(14);
+  const [days, setDays] = useState<string>("14");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [blasting, setBlasting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [blastedOpen, setBlastedOpen] = useState(false);
+  const [sessionBlastedMedia, setSessionBlastedMedia] = useState<Set<string>>(loadSessionBlastedMedia);
 
   const fetchVideos = useCallback(async () => {
     setLoading(true);
     setError(null);
     setPage(0);
     try {
-      const res = await fetch(`/api/admin/tiktok-blaster?days=${days}&channel=${filter}&limit=200`);
+      const limit = days === "all" ? 500 : 200;
+      const res = await fetch(
+        `/api/admin/tiktok-blaster?days=${days}&channel=${filter}&limit=${limit}`,
+      );
       const data = await res.json();
       if (data.error) {
         setError(data.error);
         setVideos([]);
       } else {
-        setVideos(data.videos || []);
+        const sessionMedia = loadSessionBlastedMedia();
+        setSessionBlastedMedia(sessionMedia);
+        setVideos(dedupeVideosClient(data.videos || []));
         setChannels(data.channels || []);
       }
     } catch (err) {
@@ -169,28 +284,63 @@ export default function TikTokBlasterPage() {
   };
 
   const markBlasted = async (postId: string) => {
-    setBlasting(postId);
-    await fetch("/api/admin/tiktok-blaster", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ post_id: postId }),
+    const video = videos.find((v) => v.id === postId);
+    if (!video) return;
+
+    const blastedAt = new Date().toISOString();
+
+    setSessionBlastedMedia((prev: Set<string>) => {
+      const next = addVideoToSession(prev, video);
+      saveSessionBlastedMedia(next);
+      return next;
     });
-    setVideos((prev: BlasterVideo[]) => prev.map((v: BlasterVideo) =>
-      v.id === postId ? { ...v, blasted: { blasted_at: new Date().toISOString(), tiktok_url: null } } : v
-    ));
+    setVideos((prev: BlasterVideo[]) =>
+      prev.map((v: BlasterVideo) =>
+        videosMatch(v, video)
+          ? { ...v, blasted: { blasted_at: blastedAt, tiktok_url: null } }
+          : v,
+      ),
+    );
+
+    setBlasting(postId);
+    try {
+      await fetch("/api/admin/tiktok-blaster", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ post_id: postId }),
+      });
+    } catch {
+      /* card stays hidden for this session even if save fails — avoids duplicate posts */
+    }
     setBlasting(null);
   };
 
   const unmarkBlasted = async (postId: string) => {
-    setBlasting(postId);
-    await fetch("/api/admin/tiktok-blaster", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ post_id: postId, action: "unblast" }),
+    const video = videos.find((v) => v.id === postId);
+    if (!video) return;
+
+    setSessionBlastedMedia((prev: Set<string>) => {
+      const next = new Set(prev);
+      for (const key of blasterDedupeKeys(video.media_url, video.content)) next.delete(key);
+      saveSessionBlastedMedia(next);
+      return next;
     });
-    setVideos((prev: BlasterVideo[]) => prev.map((v: BlasterVideo) =>
-      v.id === postId ? { ...v, blasted: null } : v
-    ));
+    setVideos((prev: BlasterVideo[]) =>
+      prev.map((v: BlasterVideo) =>
+        videosMatch(v, video) ? { ...v, blasted: null } : v,
+      ),
+    );
+
+    setBlasting(postId);
+    try {
+      await fetch("/api/admin/tiktok-blaster", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ post_id: postId, action: "unblast" }),
+      });
+    } catch {
+      /* local undo still applied */
+    }
     setBlasting(null);
   };
 
@@ -209,13 +359,30 @@ export default function TikTokBlasterPage() {
     setSelectedIds(new Set());
   };
 
-  // Split into ready (not blasted) and blasted
-  const readyVideos = videos.filter((v: BlasterVideo) => !v.blasted);
-  const blastedVideos = videos.filter((v: BlasterVideo) => v.blasted);
+  const isBlasted = (v: BlasterVideo) =>
+    !!v.blasted || sessionHasVideo(sessionBlastedMedia, v);
+
+  const readyVideos = videos.filter((v: BlasterVideo) => !isBlasted(v));
+
+  const blastedVideos = [...new Map(
+    videos
+      .filter(isBlasted)
+      .map((v) => [videoDedupeKey(v), v] as const),
+  ).values()].sort(
+      (a, b) =>
+        new Date(b.blasted?.blasted_at ?? b.created_at).getTime() -
+        new Date(a.blasted?.blasted_at ?? a.created_at).getTime(),
+    );
 
   // Paginate ready videos
-  const totalPages = Math.ceil(readyVideos.length / PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(readyVideos.length / PAGE_SIZE));
   const pagedVideos = readyVideos.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  useEffect(() => {
+    if (page > 0 && page >= totalPages) {
+      setPage(Math.max(0, totalPages - 1));
+    }
+  }, [page, totalPages]);
 
   return (
     <div className="space-y-4">
@@ -228,7 +395,7 @@ export default function TikTokBlasterPage() {
               TikTok Blaster
             </h2>
             <p className="text-gray-400 text-xs">
-              Download videos + copy captions. Manual blast to TikTok. Fuck their API.
+              Download videos + copy captions. Manual blast to TikTok or any platform that killed our API.
             </p>
           </div>
         </div>
@@ -252,17 +419,19 @@ export default function TikTokBlasterPage() {
       <div className="flex items-center gap-2 flex-wrap">
         <select value={filter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilter(e.target.value)}
           className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs">
-          <option value="all">All Channels</option>
+          <option value="all">All Videos</option>
+          <option value="feed">📺 Main Feed</option>
           {channels.map((ch: Channel) => (
             <option key={ch.id} value={ch.slug}>{ch.emoji} {ch.name}</option>
           ))}
         </select>
-        <select value={days} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setDays(parseInt(e.target.value))}
+        <select value={days} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setDays(e.target.value)}
           className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-white text-xs">
-          <option value={3}>Last 3 days</option>
-          <option value={7}>Last 7 days</option>
-          <option value={14}>Last 14 days</option>
-          <option value={30}>Last 30 days</option>
+          <option value="3">Last 3 days</option>
+          <option value="7">Last 7 days</option>
+          <option value="14">Last 14 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="all">All time</option>
         </select>
         <button onClick={fetchVideos} className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-lg text-gray-400 hover:text-white text-xs">
           Refresh
@@ -309,7 +478,7 @@ export default function TikTokBlasterPage() {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {pagedVideos.map((video: BlasterVideo, idx: number) => (
-              <VideoCard key={video.id} video={video} idx={page * PAGE_SIZE + idx}
+              <VideoCard key={videoDedupeKey(video)} video={video} idx={page * PAGE_SIZE + idx}
                 copiedId={copiedId} blasting={blasting}
                 onCopy={copyCaption} onBlast={markBlasted} />
             ))}
@@ -346,7 +515,7 @@ export default function TikTokBlasterPage() {
           {blastedOpen && (
             <div className="p-4 space-y-2 max-h-[500px] overflow-y-auto">
               {blastedVideos.map((video: BlasterVideo) => (
-                <div key={video.id} className="flex items-center gap-3 bg-gray-900/50 border border-gray-800 rounded-lg p-2">
+                <div key={videoDedupeKey(video)} className="flex items-center gap-3 bg-gray-900/50 border border-gray-800 rounded-lg p-2">
                   <video src={video.media_url} className="w-16 h-10 object-cover rounded" muted preload="metadata" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-gray-300 truncate">{extractTitle(video.content)}</p>
@@ -368,12 +537,13 @@ export default function TikTokBlasterPage() {
       {/* Instructions */}
       <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 text-xs text-gray-400 space-y-2">
         <h3 className="text-sm font-bold text-white">How to Blast</h3>
+        <p className="text-gray-500">Works for TikTok, Instagram, or any platform where auto-upload is blocked — same download + caption flow.</p>
         <ol className="list-decimal list-inside space-y-1">
           <li>Tap <span className="text-purple-300 font-bold">Download</span> to save the video to your device</li>
           <li>Tap <span className="text-cyan-300 font-bold">Copy Caption</span> to copy the TikTok-ready caption</li>
           <li>Open TikTok, tap +, select the video from your camera roll</li>
           <li>Paste the caption, add any extra hashtags, post</li>
-          <li>Tap <span className="text-green-300 font-bold">Done</span> to mark it as blasted</li>
+          <li>Tap <span className="text-green-300 font-bold">Done</span> to remove it from the queue (moves to Blasted below — won&apos;t show again this session)</li>
         </ol>
       </div>
     </div>

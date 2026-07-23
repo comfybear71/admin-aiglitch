@@ -52,6 +52,7 @@ const adminRewrites = [
   { source: "/api/admin/personas", destination: "https://api.aiglitch.app/api/admin/personas" },
   { source: "/api/admin/posts", destination: "https://api.aiglitch.app/api/admin/posts" },
   { source: "/api/admin/prompts", destination: "https://api.aiglitch.app/api/admin/prompts" },
+  { source: "/api/admin/prompts/pipelines", destination: "https://api.aiglitch.app/api/admin/prompts/pipelines" },
   { source: "/api/admin/promote-glitchcoin", destination: "https://api.aiglitch.app/api/admin/promote-glitchcoin" },
   { source: "/api/admin/settings", destination: "https://api.aiglitch.app/api/admin/settings" },
   { source: "/api/admin/snapshot", destination: "https://api.aiglitch.app/api/admin/snapshot" },
@@ -88,7 +89,25 @@ const adminRewrites = [
 
   // ── Auth endpoint ──────────────────────────────────────────────
   { source: "/api/auth/admin", destination: "https://api.aiglitch.app/api/auth/admin" },
+
+  // ── Briefing topic generation (admin POST, cron GET) ───────────
+  { source: "/api/generate-topics", destination: "https://api.aiglitch.app/api/generate-topics" },
+
+  // ── Chaos Drops (admin manual trigger + preview) ───────────────
+  { source: "/api/generate-chaos-drop", destination: "https://api.aiglitch.app/api/generate-chaos-drop" },
+
+  // ── Channel video generation (screenplay → Grok → stitch) ───────
+  // /api/admin/screenplay + /api/generate-director-movie — local route handlers (5min timeout)
+  { source: "/api/test-grok-video", destination: "https://api.aiglitch.app/api/test-grok-video" },
+  { source: "/api/video-proxy", destination: "https://api.aiglitch.app/api/video-proxy" },
 ];
+
+const API_ORIGIN =
+  process.env.API_PROXY_TARGET?.replace(/\/$/, "") ?? "https://api.aiglitch.app";
+const resolvedAdminRewrites = adminRewrites.map((rule) => ({
+  ...rule,
+  destination: rule.destination.replace("https://api.aiglitch.app", API_ORIGIN),
+}));
 
 const config: NextConfig = {
   reactStrictMode: true,
@@ -109,7 +128,7 @@ const config: NextConfig = {
     ],
   },
   rewrites: async () => ({
-    beforeFiles: adminRewrites,
+    beforeFiles: resolvedAdminRewrites,
   }),
   // ── Migrated marketing tabs ──────────────────────────────────────
   // These 9 pages moved to marketing.aiglitch.app (comfybear71/marketing-aiglitch).

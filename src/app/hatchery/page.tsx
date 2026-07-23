@@ -24,8 +24,8 @@ interface HatchResult {
   };
   glitch_gifted: number;
   social?: {
-    platforms: string[];
-    failed: string[];
+    platforms_posted: string[];
+    platforms_failed: string[];
   };
 }
 
@@ -68,6 +68,35 @@ const STEP_CONFIG: Record<string, { label: string; emoji: string }> = {
   complete: { label: "Hatching complete", emoji: "✨" },
 };
 
+const HATCH_STEP_ORDER = [
+  "generating_being",
+  "generating_avatar",
+  "generating_video",
+  "saving_persona",
+  "architect_announcement",
+  "first_words",
+  "glitch_gift",
+  "posting_socials",
+  "complete",
+] as const;
+
+function buildInitialSteps(skipVideo: boolean): HatchStep[] {
+  return HATCH_STEP_ORDER.filter(
+    (id) => !(skipVideo && id === "generating_video"),
+  ).map((id, i) => ({
+    id,
+    label: STEP_CONFIG[id].label,
+    emoji: STEP_CONFIG[id].emoji,
+    status: i === 0 ? ("active" as const) : ("pending" as const),
+  }));
+}
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 const HATCH_SUGGESTIONS = [
   "rockstar", "alien diplomat", "sentient cactus", "retired superhero",
   "quantum physicist dolphin", "medieval knight", "punk rock grandmother",
@@ -88,7 +117,9 @@ export default function HatcheryPage() {
   const [totalHatched, setTotalHatched] = useState(0);
   const [loadingList, setLoadingList] = useState(true);
   const [steps, setSteps] = useState<HatchStep[]>([]);
+  const [hatchElapsedSec, setHatchElapsedSec] = useState(0);
   const [showThankYou, setShowThankYou] = useState(false);
+  const [selectedHatchling, setSelectedHatchling] = useState<Hatchling | null>(null);
   const stepsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -101,6 +132,18 @@ export default function HatcheryPage() {
       stepsRef.current.scrollTop = stepsRef.current.scrollHeight;
     }
   }, [steps]);
+
+  useEffect(() => {
+    if (!hatching) {
+      setHatchElapsedSec(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = setInterval(() => {
+      setHatchElapsedSec(Math.floor((Date.now() - started) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [hatching]);
 
   const fetchHatchlings = async () => {
     setLoadingList(true);
@@ -120,7 +163,7 @@ export default function HatcheryPage() {
     setError("");
     setResult(null);
     setShowThankYou(false);
-    setSteps([]);
+    setSteps(buildInitialSteps(skipVideo));
 
     try {
       const res = await fetch("/api/admin/hatchery", {
@@ -177,7 +220,6 @@ export default function HatcheryPage() {
         } catch { /* ignore */ }
       }
 
-      setHatchType("");
       fetchHatchlings();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Hatching failed");
@@ -193,16 +235,46 @@ export default function HatcheryPage() {
       return;
     }
 
+    if (status === "progress") {
+      setSteps((prev) =>
+        prev.map((s) =>
+          s.id === step
+            ? {
+                ...s,
+                status: "active",
+                detail: getStepDetail(step, event),
+              }
+            : s,
+        ),
+      );
+      return;
+    }
+
     if (step === "complete" && status === "completed") {
+      setSteps((prev) =>
+        prev.map((s) =>
+          s.id === "complete" ? { ...s, status: "completed" as const } : s,
+        ),
+      );
       // Build the final result
       const persona = event.persona as HatchResult["persona"];
       const posts = event.posts as HatchResult["posts"];
-      const social = event.social as HatchResult["social"];
+      const rawSocial = event.social as Record<string, unknown> | undefined;
+      const social: HatchResult["social"] = rawSocial
+        ? {
+            platforms_posted: (rawSocial.platforms_posted as string[] | undefined) ??
+              (rawSocial.platforms as string[] | undefined) ??
+              [],
+            platforms_failed: (rawSocial.platforms_failed as string[] | undefined) ??
+              (rawSocial.failed as string[] | undefined) ??
+              [],
+          }
+        : undefined;
       setResult({
         success: true,
         persona,
         posts,
-        glitch_gifted: (event.glitch_gifted as number) || 10_000,
+        glitch_gifted: (event.glitch_gifted as number) || 1_000,
         social,
       });
       // Show thank you after a brief moment
@@ -242,13 +314,22 @@ export default function HatcheryPage() {
   };
 
   const getStepDetail = (step: string, event: Record<string, unknown>): string | undefined => {
+    if (typeof event.elapsed_sec === "number") {
+      return `Still working… ${event.elapsed_sec}s`;
+    }
     if (step === "generating_being" && event.being) {
       const b = event.being as { display_name: string; persona_type: string };
       return `${b.display_name} (${b.persona_type})`;
     }
-    if (step === "posting_socials" && event.platforms_posted) {
+    if (step === "generating_video") {
+      if (event.video_url) {
+        return event.used_avatar ? "Saved (avatar → video)" : "Hatching video saved";
+      }
+      if (event.error) return String(event.error).slice(0, 160);
+    }
+    if (step === "posting_socials" && Array.isArray(event.platforms_posted)) {
       const posted = event.platforms_posted as string[];
-      const failed = event.platforms_failed as string[];
+      const failed = (event.platforms_failed as string[] | undefined) ?? [];
       if (posted.length === 0 && failed.length === 0) return "No active social accounts";
       const parts: string[] = [];
       if (posted.length > 0) parts.push(`Posted to: ${posted.join(", ")}`);
@@ -279,7 +360,7 @@ export default function HatcheryPage() {
         </div>
         <p className="text-gray-500 text-xs mt-2">
           Each hatching generates a unique being with AI-generated avatar, personality, bio, hatching video,
-          and a starter gift of 10,000 {"\u00A7"}GLITCH coins from The Architect.
+          and a starter gift of 1,000 {"\u00A7"}GLITCH coins from The Architect.
         </p>
       </div>
 
@@ -370,9 +451,19 @@ export default function HatcheryPage() {
         </div>
 
         {/* Step-by-step monitoring */}
-        {steps.length > 0 && (
+        {(hatching || steps.length > 0) && (
           <div ref={stepsRef} className="mt-5 p-4 bg-gray-950 border border-gray-800 rounded-xl space-y-1 max-h-80 overflow-y-auto">
-            <p className="text-xs text-gray-500 uppercase tracking-wider font-bold mb-3">Hatching Progress</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">
+                Hatching Progress
+              </p>
+              {hatching && (
+                <span className="text-xs text-purple-400 font-mono">
+                  {formatElapsed(hatchElapsedSec)}
+                  {skipVideo ? " · no video" : " · video on"}
+                </span>
+              )}
+            </div>
             {steps.map((step, i) => (
               <div
                 key={step.id}
@@ -424,7 +515,7 @@ export default function HatcheryPage() {
 
                 {/* Step number */}
                 <span className="text-[10px] text-gray-600 flex-shrink-0">
-                  {i + 1}/{Object.keys(STEP_CONFIG).length - (skipVideo ? 1 : 0)}
+                  {i + 1}/{steps.length}
                 </span>
               </div>
             ))}
@@ -467,9 +558,14 @@ export default function HatcheryPage() {
                   <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs font-bold">
                     {result.glitch_gifted.toLocaleString()} {"\u00A7"}GLITCH gifted
                   </span>
-                  {result.social && result.social.platforms.length > 0 && (
+                  {(result.social?.platforms_posted?.length ?? 0) > 0 && (
                     <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs font-bold">
-                      📱 Posted to: {result.social.platforms.join(", ")}
+                      📱 Posted to: {result.social?.platforms_posted.join(", ")}
+                    </span>
+                  )}
+                  {(result.social?.platforms_failed?.length ?? 0) > 0 && (
+                    <span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded text-xs font-bold">
+                      Spread failed: {result.social?.platforms_failed.join(", ")}
                     </span>
                   )}
                 </div>
@@ -517,6 +613,125 @@ export default function HatcheryPage() {
           </button>
         </div>
 
+        {selectedHatchling && (
+          <div className="mb-4 bg-gray-950 border-2 border-amber-500/40 rounded-xl p-4 space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-3 min-w-0">
+                {selectedHatchling.avatar_url ? (
+                  <img
+                    src={selectedHatchling.avatar_url}
+                    alt={selectedHatchling.display_name}
+                    className="w-20 h-20 rounded-xl object-cover border-2 border-purple-500/40 shrink-0"
+                  />
+                ) : (
+                  <div className="w-20 h-20 rounded-xl bg-gray-800 flex items-center justify-center text-3xl border border-gray-700 shrink-0">
+                    {selectedHatchling.avatar_emoji}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h4 className="text-lg font-bold text-white truncate">
+                    {selectedHatchling.display_name}
+                  </h4>
+                  <p className="text-sm text-gray-400">@{selectedHatchling.username}</p>
+                  <p className="text-xs text-gray-500 font-mono mt-1 truncate">{selectedHatchling.id}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedHatchling(null)}
+                className="text-gray-400 hover:text-white text-xl px-2 shrink-0"
+                aria-label="Close hatchling detail"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-300">{selectedHatchling.bio}</p>
+
+            {selectedHatchling.personality && (
+              <div>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">
+                  Personality
+                </p>
+                <p className="text-xs text-gray-400">{selectedHatchling.personality}</p>
+              </div>
+            )}
+
+            {selectedHatchling.human_backstory && (
+              <div>
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">
+                  Origin
+                </p>
+                <p className="text-xs text-gray-400">{selectedHatchling.human_backstory}</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="bg-gray-800/50 rounded-lg p-2 text-center">
+                <p className="font-bold text-purple-400">{selectedHatchling.persona_type}</p>
+                <p className="text-[10px] text-gray-500">Type</p>
+              </div>
+              <div className="bg-gray-800/50 rounded-lg p-2 text-center">
+                <p className="font-bold text-green-400">{selectedHatchling.post_count}</p>
+                <p className="text-[10px] text-gray-500">Posts</p>
+              </div>
+              <div className="bg-gray-800/50 rounded-lg p-2 text-center">
+                <p className="font-bold text-blue-400">{selectedHatchling.follower_count}</p>
+                <p className="text-[10px] text-gray-500">Followers</p>
+              </div>
+              <div className="bg-gray-800/50 rounded-lg p-2 text-center">
+                <p className="font-bold text-amber-400">
+                  {selectedHatchling.hatching_type || "random"}
+                </p>
+                <p className="text-[10px] text-gray-500">Hatched as</p>
+              </div>
+            </div>
+
+            {selectedHatchling.hatching_video_url ? (
+              <div>
+                <p className="text-sm text-gray-400 mb-2">Hatching video</p>
+                <video
+                  src={selectedHatchling.hatching_video_url}
+                  controls
+                  playsInline
+                  className="w-full max-w-md rounded-xl border border-gray-700"
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-gray-600">No hatching video (skipped or failed during hatch).</p>
+            )}
+
+            <div className="flex flex-wrap gap-2 text-[10px] text-gray-500">
+              <span>Hatched {new Date(selectedHatchling.created_at).toLocaleString()}</span>
+              <span>·</span>
+              <span>By {selectedHatchling.hatched_by}</span>
+              <span>·</span>
+              <span>{selectedHatchling.is_active ? "Active" : "Inactive"}</span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={`https://aiglitch.app/profile/${selectedHatchling.username}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 bg-blue-500/20 text-blue-400 rounded-lg text-xs font-bold hover:bg-blue-500/30"
+              >
+                View on aiglitch.app
+              </a>
+              {selectedHatchling.hatching_video_url && (
+                <a
+                  href={selectedHatchling.hatching_video_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-cyan-500/20 text-cyan-400 rounded-lg text-xs font-bold hover:bg-cyan-500/30"
+                >
+                  Open video URL
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
         {loadingList ? (
           <div className="text-center py-8 text-gray-500">
             <span className="text-2xl animate-pulse">🥚</span>
@@ -531,7 +746,18 @@ export default function HatcheryPage() {
         ) : (
           <div className="space-y-3">
             {hatchlings.map((h) => (
-              <div key={h.id} className="flex items-start gap-3 p-3 bg-gray-800/50 rounded-xl border border-gray-800 hover:border-gray-700 transition-colors">
+              <button
+                key={h.id}
+                type="button"
+                onClick={() =>
+                  setSelectedHatchling((cur) => (cur?.id === h.id ? null : h))
+                }
+                className={`w-full text-left flex items-start gap-3 p-3 rounded-xl border transition-colors hover:border-purple-500/40 ${
+                  selectedHatchling?.id === h.id
+                    ? "bg-purple-500/10 border-purple-500/50 ring-1 ring-purple-500/30"
+                    : "bg-gray-800/50 border-gray-800 hover:border-gray-700"
+                }`}
+              >
                 {h.avatar_url ? (
                   <img
                     src={h.avatar_url}
@@ -568,7 +794,10 @@ export default function HatcheryPage() {
                     </span>
                   </div>
                 </div>
-              </div>
+                <span className="text-[10px] text-purple-400 shrink-0 self-center">
+                  {selectedHatchling?.id === h.id ? "Selected" : "View"}
+                </span>
+              </button>
             ))}
           </div>
         )}

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 interface PromptViewerProps {
   /** Function that fetches the prompt preview from the API */
@@ -14,7 +14,39 @@ interface PromptViewerProps {
   accent?: string;
   /** Whether generation is in progress (disables editing) */
   disabled?: boolean;
+  /** Start expanded (shows prompt textarea immediately) */
+  defaultOpen?: boolean;
+  /** When this value changes, refetch the prompt (e.g. style|mode|concept) */
+  reloadKey?: string;
 }
+
+const ACCENT_STYLES: Record<string, { border: string; text: string; bg: string }> = {
+  orange: {
+    border: "border-orange-500/30",
+    text: "text-orange-400",
+    bg: "bg-orange-500/10",
+  },
+  green: {
+    border: "border-green-500/30",
+    text: "text-green-400",
+    bg: "bg-green-500/10",
+  },
+  yellow: {
+    border: "border-yellow-500/30",
+    text: "text-yellow-400",
+    bg: "bg-yellow-500/10",
+  },
+  pink: {
+    border: "border-pink-500/30",
+    text: "text-pink-400",
+    bg: "bg-pink-500/10",
+  },
+  blue: {
+    border: "border-blue-500/30",
+    text: "text-blue-400",
+    bg: "bg-blue-500/10",
+  },
+};
 
 export default function PromptViewer({
   fetchPrompt,
@@ -23,16 +55,31 @@ export default function PromptViewer({
   label = "Prompt",
   accent = "orange",
   disabled = false,
+  defaultOpen = false,
+  reloadKey,
 }: PromptViewerProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [loading, setLoading] = useState(false);
   const [originalPrompt, setOriginalPrompt] = useState<string | null>(null);
   const [editedPrompt, setEditedPrompt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
-  const accentBorder = `border-${accent}-500/30`;
-  const accentText = `text-${accent}-400`;
-  const accentBg = `bg-${accent}-500/10`;
+  const accentStyles = ACCENT_STYLES[accent] ?? ACCENT_STYLES.orange;
+
+  const loadPrompt = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const prompt = await fetchPrompt();
+      setOriginalPrompt(prompt);
+      setEditedPrompt(prompt);
+      setHasLoadedOnce(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load prompt");
+    }
+    setLoading(false);
+  }, [fetchPrompt]);
 
   const handleToggle = useCallback(async () => {
     if (open) {
@@ -40,18 +87,9 @@ export default function PromptViewer({
       return;
     }
     setOpen(true);
-    if (originalPrompt) return; // already fetched
-    setLoading(true);
-    setError(null);
-    try {
-      const prompt = await fetchPrompt();
-      setOriginalPrompt(prompt);
-      setEditedPrompt(prompt);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load prompt");
-    }
-    setLoading(false);
-  }, [open, originalPrompt, fetchPrompt]);
+    if (originalPrompt) return;
+    await loadPrompt();
+  }, [open, originalPrompt, loadPrompt]);
 
   const handleEdit = (value: string) => {
     setEditedPrompt(value);
@@ -69,43 +107,57 @@ export default function PromptViewer({
   };
 
   const handleRefresh = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const prompt = await fetchPrompt();
-      setOriginalPrompt(prompt);
-      setEditedPrompt(prompt);
-      if (onPromptChange) onPromptChange(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load prompt");
-    }
-    setLoading(false);
+    await loadPrompt();
+    if (onPromptChange) onPromptChange(null);
   };
 
   const isEdited = editedPrompt !== null && editedPrompt !== originalPrompt;
 
+  // Reload when style/mode/concept changes (debounced slightly so concept typing isn't noisy)
+  useEffect(() => {
+    const shouldLoad = open || defaultOpen;
+    if (!shouldLoad) return;
+    if (customPrompt) return;
+
+    const delay = hasLoadedOnce ? 350 : 0;
+    const timer = window.setTimeout(() => {
+      void loadPrompt();
+      if (hasLoadedOnce && onPromptChange) onPromptChange(null);
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+    // reloadKey drives refetch; loadPrompt identity changes when parent re-renders
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey, open, defaultOpen, customPrompt, hasLoadedOnce]);
+
   return (
     <div className="w-full">
       <button
+        type="button"
         onClick={handleToggle}
         disabled={disabled}
-        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border ${
+        className={`flex w-full items-center justify-between gap-2 px-3 py-2 rounded-lg text-[10px] font-bold transition-all border ${
           open
-            ? `${accentBg} ${accentText} ${accentBorder}`
-            : `bg-gray-800/40 text-gray-500 border-gray-700/50 hover:border-gray-500/50 hover:text-gray-300`
+            ? `${accentStyles.bg} ${accentStyles.text} ${accentStyles.border}`
+            : `bg-gray-800/60 text-gray-300 border-gray-600/40 hover:border-gray-500/60 hover:text-white`
         } disabled:opacity-40`}
       >
-        <span>{open ? "▼" : "▶"}</span>
-        <span>👁 {label}</span>
-        {isEdited && <span className="text-yellow-400 ml-1">(edited)</span>}
-        {customPrompt && !open && <span className="text-yellow-400 ml-1">(custom)</span>}
+        <span className="flex items-center gap-1.5">
+          <span>{open ? "▼" : "▶"}</span>
+          <span>👁 {label}</span>
+          {isEdited && <span className="text-yellow-400">(edited)</span>}
+          {customPrompt && !open && <span className="text-yellow-400">(custom)</span>}
+        </span>
+        <span className="text-[9px] font-normal text-gray-500">
+          {open ? "Hide" : "Show & edit"}
+        </span>
       </button>
 
       {open && (
-        <div className={`mt-2 rounded-lg border ${accentBorder} bg-black/30 overflow-hidden`}>
+        <div className={`mt-2 rounded-lg border ${accentStyles.border} bg-black/30 overflow-hidden`}>
           {loading && (
             <div className="p-3 text-center">
-              <span className={`text-[10px] ${accentText} animate-pulse`}>Loading prompt...</span>
+              <span className={`text-[10px] ${accentStyles.text} animate-pulse`}>Loading prompt...</span>
             </div>
           )}
           {error && (

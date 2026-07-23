@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import type { Stats, Persona, User } from "./admin-types";
+import { summarizeSpreadLog, type SpreadResult } from "@/lib/run-architect-promo";
 
 // ── Background Generation Runner ──
 // Runs the full generation pipeline (screenplay → submit → poll → stitch)
@@ -15,6 +16,35 @@ interface GenerationRunner {
 type LogSetter = (fn: (prev: string[]) => string[]) => void;
 type ProgressState = { label: string; current: number; total: number; startTime: number } | null;
 type ProgressSetter = (fn: ProgressState | ((prev: ProgressState) => ProgressState)) => void;
+
+async function readAdminJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error(text.trim().slice(0, 300) || `HTTP ${res.status}`);
+  }
+}
+
+async function pollChannelSpreadStatus(
+  postId: string,
+): Promise<{ results: SpreadResult[]; timedOut: boolean }> {
+  const deadline = Date.now() + 600_000;
+  let lastResults: SpreadResult[] = [];
+  while (Date.now() < deadline) {
+    const res = await fetch(
+      `/api/generate-director-movie?action=spread_status&post_id=${encodeURIComponent(postId)}`,
+    );
+    const data = await readAdminJson(res);
+    const results = (Array.isArray(data.spreadResults) ? data.spreadResults : []) as SpreadResult[];
+    lastResults = results;
+    if (data.complete) {
+      return { results, timedOut: false };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return { results: lastResults, timedOut: true };
+}
 
 async function runBackgroundGeneration(
   params: {
@@ -34,18 +64,35 @@ async function runBackgroundGeneration(
 
   try {
     // ── Phase 1: Generate screenplay ──
+    setLog(prev => [...prev, `  📜 Writing screenplay (Grok 50% / Claude 50%) — may take 1-2 min...`]);
     const screenplayRes = await fetch("/api/admin/screenplay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(screenplayBody),
+      signal: AbortSignal.timeout(300_000),
     });
-    let screenplay = await screenplayRes.json();
+    let screenplay: Record<string, unknown>;
+    try {
+      screenplay = await readAdminJson(screenplayRes);
+    } catch (parseErr) {
+      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      setLog(prev => [...prev, `  ❌ Screenplay failed (${screenplayRes.status}): ${msg}`]);
+      if (/internal server error|proxy failed|fetch failed|ECONNREFUSED/i.test(msg)) {
+        setLog(prev => [...prev, `  💡 Local dev: ensure aiglitch-api is on :3000 and admin started with API_PROXY_TARGET=http://localhost:3000`]);
+      }
+      setProgress(null);
+      setGenerating(false);
+      return;
+    }
 
-    if (screenplay.error || abortRef.current) {
-      const errMsg = screenplay.error || "Aborted";
+    if (!screenplayRes.ok || screenplay.error || abortRef.current) {
+      const errMsg = abortRef.current
+        ? "Aborted"
+        : String(screenplay.error || `HTTP ${screenplayRes.status}`);
       setLog(prev => [...prev, `  ❌ Screenplay generation failed: ${errMsg}`]);
       // If rate limited, retry once after 30s
-      if (screenplay.error?.includes("429") || screenplay.error?.includes("rate") || screenplay.error?.includes("Too many")) {
+      const errStr = typeof screenplay.error === "string" ? screenplay.error : "";
+      if (errStr.includes("429") || errStr.includes("rate") || errStr.includes("Too many")) {
         setLog(prev => [...prev, `  ⏳ Rate limited — retrying screenplay in 30s...`]);
         await new Promise(resolve => setTimeout(resolve, 30000));
         const retryRes = await fetch("/api/admin/screenplay", {
@@ -100,7 +147,12 @@ async function runBackgroundGeneration(
     const totalGrokifyBudget = sponsorCampaigns.reduce((sum: number, c: { grokifyScenes?: number }) => sum + (c.grokifyScenes ?? 3), 0);
 
     if (hasSponsorVisuals && totalGrokifyBudget > 0) {
-      const breakdown = sponsorCampaigns.map((c: { brandName?: string; grokifyScenes?: number }, idx: number) => `${c.brandName}=${c.grokifyScenes ?? 3}`).join(", ");
+      const breakdown = sponsorCampaigns
+        .map(
+          (c: { brandName?: string; productName?: string; grokifyScenes?: number }) =>
+            `${c.productName || c.brandName}=${c.grokifyScenes ?? 3}`,
+        )
+        .join(", ");
       setLog(prev => [...prev, `  💰 ${sponsors.length} sponsor(s) — ${totalGrokifyBudget} total Grokified scenes (${breakdown})`]);
     }
 
@@ -181,7 +233,7 @@ async function runBackgroundGeneration(
                 const used = isOutro ? 0 : (grokifyCountPerCampaign[campaignIdx] || 0);
                 const limit = isOutro ? 0 : ((sponsorCampaigns[campaignIdx] as { grokifyScenes?: number })?.grokifyScenes ?? 3);
                 const mode = grokData.mode === "image-edit" ? "product image edited in" : "generated from description";
-                setLog(prev => [...prev, `  ✅ Grokified ${campaign.brandName || "sponsor"}${!isOutro ? ` (${used}/${limit})` : ""} — ${mode}`]);
+                setLog(prev => [...prev, `  ✅ Grokified ${campaign.productName || campaign.brandName || "sponsor"}${!isOutro ? ` (${used}/${limit})` : ""} — ${mode}`]);
               } else {
                 setLog(prev => [...prev, `  ⚠️ Grokify returned no image: ${grokData.error || "unknown"}`]);
               }
@@ -315,7 +367,7 @@ async function runBackgroundGeneration(
 
     // ── Phase 4: Stitch all clips into one video ──
     setLog(prev => [...prev, ``]);
-    setLog(prev => [...prev, `🧩 Stitching ${doneScenes.size} clips into one video...`]);
+    setLog(prev => [...prev, `🧩 Stitching ${doneScenes.size} clips into one video (may take 1-2 min)...`]);
     setProgress({ label: `🧩 Stitching`, current: 1, total: 1, startTime: Date.now() });
 
     try {
@@ -329,6 +381,7 @@ async function runBackgroundGeneration(
       stitchForm.append("tagline", screenplay.tagline || "");
       stitchForm.append("castList", JSON.stringify(isStudios ? (screenplay.castList || []) : []));
       stitchForm.append("channelId", chId);
+      stitchForm.append("folder", folder);
       const sponsorList = screenplay.sponsorPlacements || [];
       stitchForm.append("sponsorPlacements", JSON.stringify(sponsorList));
 
@@ -354,19 +407,47 @@ async function runBackgroundGeneration(
         return;
       }
       clearTimeout(stitchTimeout);
-      const stitchData = await stitchRes.json();
+      let stitchData: Record<string, unknown>;
+      try {
+        stitchData = await readAdminJson(stitchRes);
+      } catch (parseErr) {
+        const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        if (/internal server error|stitched|feedPostId/i.test(msg)) {
+          setLog(prev => [...prev, `⚠️ Stitch may have succeeded — check channel feed at /channels/aitunes`]);
+        } else {
+          setLog(prev => [...prev, `❌ Stitch failed (${stitchRes.status}): ${msg}`]);
+        }
+        if (/internal server error|proxy failed|ECONNREFUSED/i.test(msg)) {
+          setLog(prev => [...prev, `  💡 Restart admin after pulling latest — stitch needs local route handler`]);
+        }
+        setProgress(null);
+        setGenerating(false);
+        return;
+      }
 
       if (stitchRes.ok) {
         setLog(prev => [...prev, `✅ VIDEO STITCHED! ${stitchData.clipCount} clips → ${stitchData.sizeMb}MB`]);
         setLog(prev => [...prev, `🎬 Feed post: ${stitchData.feedPostId}`]);
         setLog(prev => [...prev, ``]);
-        setLog(prev => [...prev, `✅ Posted to feed — done`]);
-        if (stitchData.spreading?.length > 0) {
-          setLog(prev => [...prev, `✅ Social media marketing done → ${stitchData.spreading.join(", ")}`]);
+        setLog(prev => [...prev, `✅ Posted to feed`]);
+
+        let spreadResults: SpreadResult[] = [];
+        if (stitchData.spreadPending && typeof stitchData.feedPostId === "string") {
+          setLog(prev => [...prev, `📣 Spreading to social media…`]);
+          const poll = await pollChannelSpreadStatus(stitchData.feedPostId);
+          spreadResults = poll.results;
+          if (poll.timedOut) {
+            setLog(prev => [...prev, `⏳ Spread still finishing on API — partial results shown`]);
+          }
+        } else if (Array.isArray(stitchData.spreading) && stitchData.spreading.length > 0) {
+          spreadResults = stitchData.spreading.map((p: string) => ({ platform: p, status: "posted" }));
+        }
+        if (spreadResults.length > 0 || stitchData.spreadPending) {
+          setLog(prev => [...prev, `📡 ${summarizeSpreadLog(spreadResults)}`]);
         }
         setLog(prev => [...prev, `🙏 Thank you Architect`]);
       } else {
-        setLog(prev => [...prev, `❌ Stitch failed: ${stitchData.error || "unknown"}`]);
+        setLog(prev => [...prev, `❌ Stitch failed: ${String(stitchData.error || "unknown")}`]);
       }
     } catch (err) {
       setLog(prev => [...prev, `❌ Stitch error: ${err instanceof Error ? err.message : "unknown"}`]);
@@ -472,7 +553,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setGenerating(true);
     setGenerationChannelId(params.channelId);
     setGenerationLog([`🎬 Generating ${params.channelName} ${params.isStudios ? "movie" : "channel video"}`]);
-    setGenerationLog((prev: string[]) => [...prev, `  📜 Writing screenplay (Grok 50% / Claude 50%)...`]);
     setGenProgress({ label: `📜 Screenplay`, current: 1, total: 1, startTime: Date.now() });
 
     // Fire and forget — runs independently of any component
