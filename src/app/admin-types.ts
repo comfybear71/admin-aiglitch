@@ -30,7 +30,23 @@ export interface Stats {
   postsPerDay: { date: string; count: number }[];
   topPersonas: { username: string; display_name: string; avatar_emoji: string; follower_count: number; post_count: number; total_engagement: number }[];
   postTypes: { post_type: string; count: number }[];
-  recentPosts: { id: string; content: string; post_type: string; like_count: number; ai_like_count: number; created_at: string; username: string; display_name: string; avatar_emoji: string; media_type?: string; media_source?: string; beef_thread_id?: string; challenge_tag?: string; is_collab_with?: string }[];
+  recentPosts: {
+    id: string;
+    content: string;
+    post_type: string;
+    like_count: number;
+    ai_like_count: number;
+    created_at: string;
+    username: string;
+    display_name: string;
+    avatar_emoji: string;
+    media_url?: string | null;
+    media_type?: string | null;
+    media_source?: string;
+    beef_thread_id?: string;
+    challenge_tag?: string;
+    is_collab_with?: string;
+  }[];
   sourceCounts?: { source: string; count: number; videos: number; images: number; memes: number }[];
 }
 
@@ -99,9 +115,50 @@ export interface UserDetail {
 }
 
 export interface BriefingData {
-  activeTopics: { id: string; headline: string; summary: string; original_theme: string; anagram_mappings: string; mood: string; category: string; expires_at: string; created_at: string }[];
-  expiredTopics: { id: string; headline: string; summary: string; original_theme: string; anagram_mappings: string; mood: string; category: string; expires_at: string; created_at: string }[];
-  beefThreads: { id: string; topic: string; status: string; created_at: string; persona1_username: string; persona1_name: string; persona1_emoji: string; persona2_username: string; persona2_name: string; persona2_emoji: string }[];
+  activeTopics: {
+    id: string;
+    headline: string;
+    summary: string;
+    original_theme: string;
+    anagram_mappings: string;
+    mood: string;
+    category: string;
+    expires_at: string;
+    created_at: string;
+    source_url?: string | null;
+  }[];
+  expiredTopics: {
+    id: string;
+    headline: string;
+    summary: string;
+    original_theme: string;
+    anagram_mappings: string;
+    mood: string;
+    category: string;
+    expires_at: string;
+    created_at: string;
+    source_url?: string | null;
+  }[];
+  beefThreads: {
+    id: string;
+    topic: string;
+    status: string;
+    created_at: string;
+    persona1_username: string;
+    persona1_name: string;
+    persona1_emoji: string;
+    persona2_username: string;
+    persona2_name: string;
+    persona2_emoji: string;
+    posts?: {
+      id: string;
+      content: string;
+      created_at: string;
+      username: string;
+      display_name: string;
+      avatar_emoji: string;
+    }[];
+  }[];
   challenges: { id: string; tag: string; description: string; created_at: string; creator_username: string; creator_name: string; creator_emoji: string }[];
   topPosts: { id: string; content: string; post_type: string; like_count: number; ai_like_count: number; created_at: string; media_type?: string; beef_thread_id?: string; challenge_tag?: string; is_collab_with?: string; username: string; display_name: string; avatar_emoji: string }[];
 }

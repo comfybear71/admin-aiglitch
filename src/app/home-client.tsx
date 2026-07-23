@@ -5,15 +5,14 @@
  *
  * Glanceable zones, top → bottom:
  *   1. Health — DB, Redis, Anthropic, xAI (connectivity pills)
- *   2. Money + kill switch — AI ledger spend (24h) + Activity Level + voice
- *   3. Pulse — last active persona + 24h posts
- *   4. Stats grid — platform counts
- *   5. Cron timers — pause controls for expensive jobs
- *   6. Recent activity feed
- *   7. Content composition + Top personas — collapsed by default
+ *   2. AI Spend (24h) — compact bar
+ *   3. Platform dashboard — pulse + stats in one panel
+ *   4. Activity + jobs | Recent feed — side-by-side on lg+, feed scrolls to match height
+ *   5. Platform insights — content mix + top personas
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 
 // ─── Shared types (ported subset of activity-client's interfaces) ──────
 
@@ -162,6 +161,7 @@ interface StatsResponse {
   specialContent: { beefThreads: number; challenges: number; bookmarks: number };
   topPersonas: { username: string; display_name: string; avatar_emoji: string; follower_count: number; post_count: number; total_engagement: number }[];
   sourceCounts?: { source: string; count: number; videos: number; images: number; memes: number }[];
+  recentPosts?: ActivityPost[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -235,19 +235,18 @@ export default function HomeClient() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [aiSpend, setAiSpend] = useState({ total: 0, xai: 0, anthropic: 0 });
   const [jobPaused, setJobPaused] = useState<Record<string, boolean>>({});
-  const [voiceDisabled, setVoiceDisabled] = useState<boolean | null>(null);
 
   const [throttle, setThrottle] = useState<number>(100);
   const [throttleSave, setThrottleSave] = useState<SaveState>({ kind: "idle" });
-  const [voiceSave, setVoiceSave] = useState<SaveState>({ kind: "idle" });
   const throttleTimer = useRef<NodeJS.Timeout | null>(null);
 
   const [healthOpen, setHealthOpen] = useState(false);
   const [expandedCron, setExpandedCron] = useState<string | null>(null);
-  const [showComposition, setShowComposition] = useState(false);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   const [countdowns, setCountdowns] = useState<Record<string, number>>({});
+
+  const activityPanelRef = useRef<HTMLDivElement>(null);
+  const [feedHeight, setFeedHeight] = useState<number | undefined>(undefined);
 
   // ─── Fetchers ──
 
@@ -306,18 +305,6 @@ export default function HomeClient() {
     }
   }, []);
 
-  const fetchSettings = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/settings");
-      if (res.ok) {
-        const d = await res.json();
-        setVoiceDisabled(d.voice_disabled ?? false);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
   // Initial load — all parallel
   useEffect(() => {
     void Promise.all([
@@ -326,9 +313,8 @@ export default function HomeClient() {
       fetchHealth(),
       fetchCosts(),
       fetchJobStates(),
-      fetchSettings(),
     ]);
-  }, [fetchStats, fetchActivity, fetchHealth, fetchCosts, fetchJobStates, fetchSettings]);
+  }, [fetchStats, fetchActivity, fetchHealth, fetchCosts, fetchJobStates]);
 
   // Auto-refresh: activity 15s, stats 30s, health + costs 60s
   useEffect(() => {
@@ -338,6 +324,29 @@ export default function HomeClient() {
     const c = setInterval(fetchCosts, 60_000);
     return () => { clearInterval(a); clearInterval(s); clearInterval(h); clearInterval(c); };
   }, [fetchActivity, fetchStats, fetchHealth, fetchCosts]);
+
+  // Match Recent Activity height to Activity & Jobs on desktop
+  useEffect(() => {
+    const el = activityPanelRef.current;
+    if (!el) return;
+
+    const syncHeight = () => {
+      if (window.matchMedia("(min-width: 1024px)").matches) {
+        setFeedHeight(el.offsetHeight);
+      } else {
+        setFeedHeight(undefined);
+      }
+    };
+
+    syncHeight();
+    const ro = new ResizeObserver(syncHeight);
+    ro.observe(el);
+    window.addEventListener("resize", syncHeight);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", syncHeight);
+    };
+  }, [activity, expandedCron, throttle, jobPaused]);
 
   // Countdown ticker
   useEffect(() => {
@@ -388,28 +397,6 @@ export default function HomeClient() {
         });
       }
     }, 600);
-  };
-
-  const onVoiceToggle = async () => {
-    if (voiceDisabled === null) return;
-    const newValue = !voiceDisabled;
-    setVoiceDisabled(newValue);
-    setVoiceSave({ kind: "saving" });
-    try {
-      const res = await fetch("/api/admin/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "voice_disabled", value: String(newValue) }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setVoiceSave({ kind: "saved", at: new Date() });
-    } catch (err) {
-      setVoiceDisabled(!newValue); // rollback
-      setVoiceSave({
-        kind: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
   };
 
   const toggleJobPause = async (jobName: string) => {
@@ -464,56 +451,44 @@ export default function HomeClient() {
       {/* 1. Health */}
       <HealthPills health={health} onOpenHealth={() => setHealthOpen(true)} />
 
-      {/* 2. Money + kill switch */}
-      <MoneyKillZone
+      {/* 2. AI spend bar */}
+      <SpendBar
         aiSpend={aiSpend}
         todaysThrottledRuns={todaysThrottledRuns}
         throttle={throttle}
-        throttleSave={throttleSave}
-        onThrottleChange={onThrottleChange}
-        activeJobsCount={activeJobsCount}
-        voiceDisabled={voiceDisabled}
-        voiceSave={voiceSave}
-        onVoiceToggle={onVoiceToggle}
       />
 
-      {/* 3. Pulse */}
-      <PulseStrip activity={activity} today24hPosts={today24hPosts} />
-
-      {/* 4. Stats grid */}
-      <StatsGrid stats={stats} activity={activity} />
-
-      {/* 5. Cron timers */}
-      <CronTimers
+      {/* 3. Platform overview — pulse + stats */}
+      <PlatformDashboard
+        stats={stats}
         activity={activity}
-        countdowns={countdowns}
-        jobPaused={jobPaused}
-        throttle={throttle}
-        expandedCron={expandedCron}
-        onExpand={(name) => setExpandedCron((cur) => (cur === name ? null : name))}
-        onTogglePause={toggleJobPause}
+        today24hPosts={today24hPosts}
       />
 
-      {/* 6. Recent activity */}
-      <InterleavedFeed rows={interleaved} />
+      {/* 4. Activity controls + live feed — side-by-side on desktop, matched height */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div ref={activityPanelRef} className="min-w-0">
+          <ActivityAndJobsPanel
+            throttle={throttle}
+            throttleSave={throttleSave}
+            onThrottleChange={onThrottleChange}
+            activeJobsCount={activeJobsCount}
+            activity={activity}
+            countdowns={countdowns}
+            jobPaused={jobPaused}
+            expandedCron={expandedCron}
+            onExpand={(name) => setExpandedCron((cur) => (cur === name ? null : name))}
+            onTogglePause={toggleJobPause}
+          />
+        </div>
+        <InterleavedFeed rows={interleaved} height={feedHeight} />
+      </div>
 
-      {/* 7a. Content composition (collapsed) */}
-      <CollapsibleSection
-        open={showComposition}
-        onToggle={() => setShowComposition((x) => !x)}
-        title="🎨 Content Composition"
-      >
-        <ContentComposition stats={stats} activity={activity} />
-      </CollapsibleSection>
+      {/* 5. Content mix + top personas */}
+      <PlatformInsightsPanel stats={stats} activity={activity} />
 
-      {/* 7b. Top personas (collapsed) */}
-      <CollapsibleSection
-        open={showLeaderboard}
-        onToggle={() => setShowLeaderboard((x) => !x)}
-        title="🏆 Top Personas"
-      >
-        <TopPersonasList stats={stats} />
-      </CollapsibleSection>
+      {/* 6. Collapsed post peek — full moderation lives on Posts tab */}
+      <OverviewPostsPeek stats={stats} />
 
       {healthOpen && <HealthDrawer health={health} onClose={() => setHealthOpen(false)} />}
     </div>
@@ -563,28 +538,16 @@ function HealthPills({
   );
 }
 
-// ─── 2. Money + kill switch ───────────────────────────────────────────
+// ─── 2. AI spend bar ──────────────────────────────────────────────────
 
-function MoneyKillZone({
+function SpendBar({
   aiSpend,
   todaysThrottledRuns,
   throttle,
-  throttleSave,
-  onThrottleChange,
-  activeJobsCount,
-  voiceDisabled,
-  voiceSave,
-  onVoiceToggle,
 }: {
   aiSpend: { total: number; xai: number; anthropic: number };
   todaysThrottledRuns: number;
   throttle: number;
-  throttleSave: SaveState;
-  onThrottleChange: (v: number) => void;
-  activeJobsCount: number;
-  voiceDisabled: boolean | null;
-  voiceSave: SaveState;
-  onVoiceToggle: () => void;
 }) {
   const spendColor =
     aiSpend.total > 5
@@ -592,6 +555,64 @@ function MoneyKillZone({
       : aiSpend.total > 1
       ? "text-amber-400"
       : "text-green-400";
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-lg">💰</span>
+          <div>
+            <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+              AI Spend (24h)
+            </div>
+            <div className={`text-2xl sm:text-3xl font-black font-mono leading-none ${spendColor}`}>
+              ${aiSpend.total.toFixed(2)}
+            </div>
+          </div>
+        </div>
+        <div className="text-[10px] text-gray-500 text-right">
+          <div>
+            xAI ${aiSpend.xai.toFixed(2)} · Anthropic ${aiSpend.anthropic.toFixed(2)}
+          </div>
+          {todaysThrottledRuns > 0 && (
+            <div className="text-amber-400/80 mt-0.5">
+              {todaysThrottledRuns} runs throttled today
+            </div>
+          )}
+          {throttle === 0 && (
+            <div className="text-red-400 font-bold mt-0.5">Kill switch on</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 3. Activity level + cron jobs ────────────────────────────────────
+
+function ActivityAndJobsPanel({
+  throttle,
+  throttleSave,
+  onThrottleChange,
+  activeJobsCount,
+  activity,
+  countdowns,
+  jobPaused,
+  expandedCron,
+  onExpand,
+  onTogglePause,
+}: {
+  throttle: number;
+  throttleSave: SaveState;
+  onThrottleChange: (v: number) => void;
+  activeJobsCount: number;
+  activity: ActivityData | null;
+  countdowns: Record<string, number>;
+  jobPaused: Record<string, boolean>;
+  expandedCron: string | null;
+  onExpand: (name: string) => void;
+  onTogglePause: (name: string) => void;
+}) {
   const skippedPct = 100 - throttle;
   const sliderColor =
     throttle === 0
@@ -604,34 +625,11 @@ function MoneyKillZone({
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4 space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-1.5 mb-1">
-            <span>💰</span>
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-              AI Spend (24h)
-            </span>
-          </div>
-          <div className={`text-3xl font-black font-mono ${spendColor}`}>
-            ${aiSpend.total.toFixed(2)}
-          </div>
-          <div className="text-[10px] text-gray-500 mt-1">
-            xAI ${aiSpend.xai.toFixed(2)} · Anthropic ${aiSpend.anthropic.toFixed(2)}
-            {todaysThrottledRuns > 0 ? ` · ${todaysThrottledRuns} runs throttled` : ""}
-          </div>
-        </div>
-        {throttle === 0 && (
-          <div className="text-[11px] text-red-400 font-bold">
-            Kill switch on — jobs paused
-          </div>
-        )}
-      </div>
-
-      <div className="pt-3 border-t border-gray-800">
+      <div>
         <div className="flex items-center justify-between mb-1.5">
           <h3 className="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
             {throttle === 0 ? "⏸️" : throttle < 30 ? "🦥" : throttle < 70 ? "⚡" : "🔥"}{" "}
-            Activity Level
+            Activity & Jobs
           </h3>
           <div className="flex items-center gap-3">
             <span className="text-lg font-black font-mono" style={{ color: sliderColor }}>
@@ -675,99 +673,16 @@ function MoneyKillZone({
         </p>
       </div>
 
-      <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-800">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-xl">🔊</span>
-          <div className="min-w-0">
-            <div className="text-sm font-bold text-white">AI Voice Chat</div>
-            <div className="text-[11px] text-gray-400 truncate">
-              {voiceDisabled
-                ? "OFF — users can't hear AI personas speak"
-                : "ON — xAI / browser TTS active"}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <SaveIndicator state={voiceSave} />
-          {voiceDisabled !== null && (
-            <button
-              onClick={onVoiceToggle}
-              className={`relative w-12 h-6 rounded-full transition-colors ${
-                voiceDisabled ? "bg-gray-700" : "bg-green-500"
-              }`}
-              aria-label="Toggle AI voice"
-            >
-              <div
-                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                  voiceDisabled ? "left-0.5" : "left-[calc(100%-1.375rem)]"
-                }`}
-              />
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── 3. Pulse ─────────────────────────────────────────────────────────
-
-function PulseStrip({
-  activity,
-  today24hPosts,
-}: {
-  activity: ActivityData | null;
-  today24hPosts: number;
-}) {
-  const cur = activity?.currentlyActive ?? null;
-  const lastCron = activity?.lastCronRuns?.[0];
-
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-      <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 rounded-xl p-3">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-[10px] text-green-400 font-bold uppercase tracking-wider">
-            Last Active
-          </span>
-        </div>
-        {cur ? (
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xl shrink-0">
-              {cur.avatar_emoji}
-            </div>
-            <div className="min-w-0">
-              <div className="font-bold text-sm truncate">{cur.display_name}</div>
-              <div className="text-[10px] text-gray-400 truncate">
-                {getPostTypeEmoji(cur.post_type)} {cur.post_type} · {timeAgo(cur.created_at)}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-xs text-gray-500">No recent posts</div>
-        )}
-        {lastCron && (
-          <div className="text-[10px] text-gray-500 mt-2 truncate">
-            Last cron: <span className="text-gray-300">{lastCron.cronName}</span> ·{" "}
-            {timeAgo(lastCron.lastStartedAt)}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3">
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <span>📝</span>
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-            24h Posts
-          </span>
-        </div>
-        <div className="text-2xl font-black font-mono text-cyan-400">
-          {today24hPosts.toLocaleString()}
-        </div>
-        <div className="text-[10px] text-gray-500 mt-1">
-          avg {Math.round(today24hPosts / 24)}/hr
-        </div>
-      </div>
+      <CronTimers
+        embedded
+        activity={activity}
+        countdowns={countdowns}
+        jobPaused={jobPaused}
+        throttle={throttle}
+        expandedCron={expandedCron}
+        onExpand={onExpand}
+        onTogglePause={onTogglePause}
+      />
     </div>
   );
 }
@@ -793,60 +708,164 @@ function SaveIndicator({ state }: { state: SaveState }) {
   );
 }
 
-// ─── 4. Stats grid ────────────────────────────────────────────────────
+// ─── 4. Platform dashboard (pulse + stats) ──────────────────────────────
 
-function StatsGrid({
+function PlatformDashboard({
+  stats,
+  activity,
+  today24hPosts,
+}: {
+  stats: StatsResponse | null;
+  activity: ActivityData | null;
+  today24hPosts: number;
+}) {
+  const cur = activity?.currentlyActive ?? null;
+
+  const statCards: { label: string; value: number | string; icon: string; color: string }[] =
+    stats
+      ? [
+          { label: "Posts", value: stats.overview.totalPosts, icon: "📝", color: "text-purple-400" },
+          {
+            label: "Personas",
+            value: `${stats.overview.activePersonas}/${stats.overview.totalPersonas}`,
+            icon: "🤖",
+            color: "text-green-400",
+          },
+          { label: "Users", value: stats.overview.totalUsers, icon: "👤", color: "text-yellow-400" },
+          {
+            label: "Engagement",
+            value: stats.overview.totalHumanLikes + stats.overview.totalAILikes,
+            icon: "❤️",
+            color: "text-pink-400",
+          },
+          {
+            label: "Subs",
+            value: stats.overview.totalSubscriptions,
+            icon: "🔔",
+            color: "text-blue-400",
+          },
+          { label: "Comments", value: stats.overview.totalComments, icon: "💬", color: "text-cyan-400" },
+          { label: "Breaking", value: activity?.breaking.total ?? 0, icon: "📰", color: "text-red-400" },
+          { label: "Ads", value: activity?.ads.total ?? 0, icon: "📢", color: "text-amber-400" },
+        ]
+      : [];
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4 space-y-3">
+      <h3 className="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
+        📊 Platform Overview
+      </h3>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+        <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 rounded-xl p-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-[10px] text-green-400 font-bold uppercase tracking-wider">
+              Last Active
+            </span>
+          </div>
+          {cur ? (
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xl shrink-0">
+                {cur.avatar_emoji}
+              </div>
+              <div className="min-w-0">
+                <div className="font-bold text-sm truncate">{cur.display_name}</div>
+                <div className="text-[10px] text-gray-400 truncate">
+                  {getPostTypeEmoji(cur.post_type)} {cur.post_type} · {timeAgo(cur.created_at)}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500">No recent posts</div>
+          )}
+        </div>
+
+        <div className="bg-gray-950/60 border border-gray-800 rounded-xl p-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span>📝</span>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+              24h Posts
+            </span>
+          </div>
+          <div className="text-2xl font-black font-mono text-cyan-400">
+            {today24hPosts.toLocaleString()}
+          </div>
+          <div className="text-[10px] text-gray-500 mt-1">
+            avg {Math.round(today24hPosts / 24)}/hr
+          </div>
+        </div>
+      </div>
+
+      {!stats ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          {Array.from({ length: 8 }, (_, i) => (
+            <div
+              key={i}
+              className="bg-gray-950/60 border border-gray-800 rounded-xl p-2.5 h-16 animate-pulse"
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          {statCards.map((c) => (
+            <div
+              key={c.label}
+              className="bg-gray-950/60 border border-gray-800 rounded-xl p-2.5 sm:p-3"
+            >
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-xs">{c.icon}</span>
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
+                  {c.label}
+                </span>
+              </div>
+              <p className={`text-lg sm:text-xl font-black font-mono ${c.color}`}>
+                {typeof c.value === "number" ? c.value.toLocaleString() : c.value}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 5. Platform insights (composition + personas) ────────────────────
+
+function PlatformInsightsPanel({
   stats,
   activity,
 }: {
   stats: StatsResponse | null;
   activity: ActivityData | null;
 }) {
-  if (!stats) {
-    return (
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-        {Array.from({ length: 8 }, (_, i) => (
-          <div key={i} className="bg-gray-900 border border-gray-800 rounded-xl p-2.5 h-16 animate-pulse" />
-        ))}
-      </div>
-    );
-  }
-  const o = stats.overview;
-  const cards: { label: string; value: number | string; icon: string; color: string }[] = [
-    { label: "Posts", value: o.totalPosts, icon: "📝", color: "text-purple-400" },
-    { label: "Personas", value: `${o.activePersonas}/${o.totalPersonas}`, icon: "🤖", color: "text-green-400" },
-    { label: "Users", value: o.totalUsers, icon: "👤", color: "text-yellow-400" },
-    { label: "Engagement", value: o.totalHumanLikes + o.totalAILikes, icon: "❤️", color: "text-pink-400" },
-    { label: "Subs", value: o.totalSubscriptions, icon: "🔔", color: "text-blue-400" },
-    { label: "Comments", value: o.totalComments, icon: "💬", color: "text-cyan-400" },
-    { label: "Breaking", value: activity?.breaking.total ?? 0, icon: "📰", color: "text-red-400" },
-    { label: "Ads", value: activity?.ads.total ?? 0, icon: "📢", color: "text-amber-400" },
-  ];
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-      {cards.map((c) => (
-        <div
-          key={c.label}
-          className="bg-gray-900 border border-gray-800 rounded-xl p-2.5 sm:p-3"
-        >
-          <div className="flex items-center gap-1.5 mb-0.5">
-            <span className="text-xs">{c.icon}</span>
-            <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">
-              {c.label}
-            </span>
-          </div>
-          <p className={`text-lg sm:text-xl font-black font-mono ${c.color}`}>
-            {typeof c.value === "number" ? c.value.toLocaleString() : c.value}
-          </p>
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4">
+      <h3 className="text-xs sm:text-sm font-bold text-gray-300 mb-3 flex items-center gap-1.5">
+        🧭 Platform Insights
+      </h3>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+        <div>
+          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">
+            Content Composition
+          </h4>
+          <ContentComposition stats={stats} activity={activity} />
         </div>
-      ))}
+        <div>
+          <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">
+            Top Personas
+          </h4>
+          <TopPersonasList stats={stats} />
+        </div>
+      </div>
     </div>
   );
 }
 
-// ─── 5. Cron timers ───────────────────────────────────────────────────
+// ─── 6. Cron timers ───────────────────────────────────────────────────
 
 function CronTimers({
+  embedded = false,
   activity,
   countdowns,
   jobPaused,
@@ -855,6 +874,7 @@ function CronTimers({
   onExpand,
   onTogglePause,
 }: {
+  embedded?: boolean;
   activity: ActivityData | null;
   countdowns: Record<string, number>;
   jobPaused: Record<string, boolean>;
@@ -865,15 +885,8 @@ function CronTimers({
 }) {
   if (!activity || activity.cronSchedules.length === 0) return null;
 
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4">
-      <h3 className="text-xs sm:text-sm font-bold text-gray-300 mb-3 flex items-center gap-1.5">
-        ⏱️ Cron Job Timers
-        <span className="text-[10px] text-gray-500 font-normal">
-          ({activity.cronSchedules.length} active)
-        </span>
-      </h3>
-      <div className="divide-y divide-gray-800/60">
+  const list = (
+    <div className="divide-y divide-gray-800/60">
         {activity.cronSchedules.map((cron) => {
           const remaining = countdowns[cron.path] ?? cron.interval * 60 * 1000;
           const intervalMs = cron.interval * 60 * 1000;
@@ -1047,6 +1060,29 @@ function CronTimers({
           );
         })}
       </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="pt-3 border-t border-gray-800">
+        <div className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5">
+          ⏱️ Cron Jobs
+          <span className="text-gray-600 font-normal">({activity.cronSchedules.length} active)</span>
+        </div>
+        {list}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4">
+      <h3 className="text-xs sm:text-sm font-bold text-gray-300 mb-3 flex items-center gap-1.5">
+        ⏱️ Cron Job Timers
+        <span className="text-[10px] text-gray-500 font-normal">
+          ({activity.cronSchedules.length} active)
+        </span>
+      </h3>
+      {list}
     </div>
   );
 }
@@ -1055,29 +1091,45 @@ function CronTimers({
 
 function InterleavedFeed({
   rows,
+  height,
 }: {
   rows: Array<
     | { kind: "post"; time: number; post: ActivityPost }
     | { kind: "cron"; time: number; run: CronRun }
   >;
+  height?: number;
 }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4">
-      <h3 className="text-xs sm:text-sm font-bold text-gray-300 mb-2 flex items-center gap-1.5">
+    <div
+      className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4 flex flex-col overflow-hidden min-w-0"
+      style={height ? { height } : undefined}
+    >
+      <h3 className="text-xs sm:text-sm font-bold text-gray-300 mb-2 flex items-center gap-1.5 shrink-0">
         📡 Recent Activity
         <span className="text-[10px] text-gray-500 font-normal">
           (posts + cron runs, last {rows.length})
         </span>
       </h3>
       {rows.length === 0 ? (
-        <div className="text-xs text-gray-500 text-center py-6">Loading feed…</div>
+        <div className="text-xs text-gray-500 text-center py-6 flex-1">Loading feed…</div>
       ) : (
-        <div className="divide-y divide-gray-800/40 max-h-96 overflow-y-auto">
+        <div
+          className={`divide-y divide-gray-800/40 flex-1 min-h-0 overflow-y-scroll overscroll-contain pr-1
+            ${height ? "" : "max-h-96"}
+            [&::-webkit-scrollbar]:w-2
+            [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-gray-800/80
+            [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-600
+            [&::-webkit-scrollbar-thumb:hover]:bg-gray-500`}
+        >
           {rows.map((row) => {
             if (row.kind === "post") {
               const p = row.post;
               return (
-                <div key={`p-${p.id}`} className="flex items-center gap-2 py-1.5 text-xs">
+                <Link
+                  key={`p-${p.id}`}
+                  href={`/posts?post=${encodeURIComponent(p.id)}`}
+                  className="flex items-center gap-2 py-1.5 text-xs hover:bg-gray-800/40 rounded-lg px-1 -mx-1 transition-colors"
+                >
                   <span className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-sm shrink-0">
                     {p.avatar_emoji}
                   </span>
@@ -1096,7 +1148,7 @@ function InterleavedFeed({
                   <span className="text-[10px] text-gray-600 shrink-0">
                     {timeAgo(p.created_at)}
                   </span>
-                </div>
+                </Link>
               );
             }
             const r = row.run;
@@ -1155,36 +1207,7 @@ function InterleavedFeed({
   );
 }
 
-// ─── 7. Collapsibles + their content ──────────────────────────────────
-
-function CollapsibleSection({
-  open,
-  onToggle,
-  title,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between p-3 sm:p-4 hover:bg-gray-800/40"
-      >
-        <h3 className="text-xs sm:text-sm font-bold text-gray-300">{title}</h3>
-        <span
-          className={`text-gray-500 text-xs transition-transform ${open ? "rotate-180" : ""}`}
-        >
-          ▼
-        </span>
-      </button>
-      {open && <div className="px-3 sm:px-4 pb-3 sm:pb-4">{children}</div>}
-    </div>
-  );
-}
+// ─── Content helpers ──────────────────────────────────────────────────
 
 function ContentComposition({
   stats,
@@ -1279,6 +1302,47 @@ function TopPersonasList({ stats }: { stats: StatsResponse | null }) {
         </a>
       ))}
     </div>
+  );
+}
+
+// ─── 7. Overview posts peek ───────────────────────────────────────────
+
+function OverviewPostsPeek({ stats }: { stats: StatsResponse | null }) {
+  const posts = stats?.recentPosts ?? [];
+  if (posts.length === 0) return null;
+
+  return (
+    <details className="bg-gray-900 border border-gray-800 rounded-xl group">
+      <summary className="cursor-pointer list-none px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
+        <span className="text-xs sm:text-sm font-bold text-gray-300">
+          📝 Recent Posts
+          <span className="text-gray-500 font-normal ml-2">
+            (peek — click a row or open Posts tab to moderate)
+          </span>
+        </span>
+        <span className="text-gray-500 text-xs group-open:rotate-180 transition-transform">▼</span>
+      </summary>
+      <div className="px-3 pb-3 border-t border-gray-800 pt-2 space-y-1">
+        {posts.slice(0, 5).map((post) => (
+          <Link
+            key={post.id}
+            href={`/posts?post=${encodeURIComponent(post.id)}`}
+            className="flex items-center gap-2 py-1.5 text-xs hover:bg-gray-800/40 rounded-lg px-1 -mx-1"
+          >
+            <span>{post.avatar_emoji}</span>
+            <span className="font-bold truncate max-w-[100px]">{post.display_name}</span>
+            <span className="text-gray-500 truncate flex-1">{post.content}</span>
+            <span className="text-[10px] text-gray-600 shrink-0">{timeAgo(post.created_at)}</span>
+          </Link>
+        ))}
+        <Link
+          href="/posts"
+          className="inline-block mt-2 text-xs font-bold text-purple-400 hover:text-purple-300"
+        >
+          Open Posts tab →
+        </Link>
+      </div>
+    </details>
   );
 }
 

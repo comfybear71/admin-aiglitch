@@ -5,6 +5,54 @@ import Image from "next/image";
 import { useAdmin } from "../AdminContext";
 import type { Persona } from "../admin-types";
 import PromptViewer from "@/components/PromptViewer";
+import {
+  buildPromoPreviewUrl,
+  PROMO_MEDIA_MODES,
+  runArchitectPromo,
+  summarizeSpreadLog,
+  type PromoMediaMode,
+  type SpreadResult,
+} from "@/lib/run-architect-promo";
+
+async function readAdminJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error(text.trim().slice(0, 300) || `HTTP ${res.status}`);
+  }
+}
+
+async function pollSpreadStatus(
+  postId: string,
+  onUpdate: (results: SpreadResult[]) => void,
+  apiPath = "/api/admin/mktg",
+): Promise<{ results: SpreadResult[]; timedOut: boolean }> {
+  const deadline = Date.now() + 600_000;
+  let lastResults: SpreadResult[] = [];
+  while (Date.now() < deadline) {
+    const res = await fetch(
+      `${apiPath}?action=spread_status&post_id=${encodeURIComponent(postId)}`,
+    );
+    const data = await readAdminJson(res);
+    const results = (Array.isArray(data.spreadResults) ? data.spreadResults : []) as SpreadResult[];
+    lastResults = results;
+    onUpdate(results);
+    if (data.complete) {
+      return { results, timedOut: false };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return { results: lastResults, timedOut: true };
+}
+
+/** @deprecated alias — hero/poster spread polling */
+async function pollArchitectSpread(
+  postId: string,
+  onUpdate: (results: SpreadResult[]) => void,
+): Promise<{ results: SpreadResult[]; timedOut: boolean }> {
+  return pollSpreadStatus(postId, onUpdate, "/api/admin/mktg");
+}
 
 // Tiny 1x1 purple blur placeholder for instant avatar rendering
 const AVATAR_BLUR = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -43,16 +91,7 @@ export default function PersonasPage() {
   // Animate persona (image-to-video)
   const [animatingPersona, setAnimatingPersona] = useState<string | null>(null);
   const [initializingPersona, setInitializingPersona] = useState<string | null>(null);
-  const [reRegisteringBots, setReRegisteringBots] = useState(false);
-  const [reRegisterLog, setReRegisterLog] = useState<string[]>([]);
-  const [reRegisterProgress, setReRegisterProgress] = useState<{ current: number; total: number; done: number; failed: number } | null>(null);
-  const [generatingWallets, setGeneratingWallets] = useState(false);
-  const [walletGenLog, setWalletGenLog] = useState<string[]>([]);
-  const [walletGenProgress, setWalletGenProgress] = useState<{ current: number; total: number; done: number; failed: number } | null>(null);
   const [refreshingWallets, setRefreshingWallets] = useState<Set<string>>(new Set());
-  const [bulkRefreshing, setBulkRefreshing] = useState(false);
-  const [bulkRefreshLog, setBulkRefreshLog] = useState<string[]>([]);
-  const [bulkRefreshProgress, setBulkRefreshProgress] = useState<{ current: number; total: number; done: number; failed: number } | null>(null);
   // Email compose modal state
   const [emailModalPersona, setEmailModalPersona] = useState<Persona | null>(null);
   const [emailTo, setEmailTo] = useState("");
@@ -316,96 +355,6 @@ export default function PersonasPage() {
     setInitializingPersona(null);
   };
 
-  const reRegisterTelegramBots = async () => {
-    if (reRegisteringBots) return;
-
-    setReRegisterLog([]);
-    setReRegisterProgress({ current: 0, total: 0, done: 0, failed: 0 });
-
-    // Step 1: fetch the list of bots (so we know total count up front)
-    let bots: { persona_id: string; bot_username: string | null; display_name: string | null }[];
-    try {
-      const listRes = await fetch("/api/admin/telegram/re-register-bots");
-      if (!listRes.ok) {
-        alert("\u274C Failed to fetch bot list");
-        return;
-      }
-      const listData = await listRes.json();
-      bots = listData.bots || [];
-    } catch (err) {
-      alert(`\u274C Failed to fetch bot list: ${err instanceof Error ? err.message : "unknown"}`);
-      return;
-    }
-
-    if (bots.length === 0) {
-      alert("No active persona Telegram bots to re-register.");
-      return;
-    }
-
-    const confirmed = confirm(
-      `Re-register webhooks for ${bots.length} persona Telegram bot${bots.length === 1 ? "" : "s"}?\n\n` +
-      `This updates existing bots to subscribe to emoji reaction events (message_reaction updates).\n\n` +
-      `Takes ~1-2 seconds per bot. Progress will show below the button.\n\n` +
-      `Safe to run multiple times.`,
-    );
-    if (!confirmed) return;
-
-    setReRegisteringBots(true);
-    setReRegisterProgress({ current: 0, total: bots.length, done: 0, failed: 0 });
-    setReRegisterLog([`\u2708\uFE0F Starting re-registration of ${bots.length} bots...`]);
-
-    let done = 0;
-    let failed = 0;
-
-    // Step 2: loop through each bot and POST per-bot, updating UI after each
-    for (let i = 0; i < bots.length; i++) {
-      const bot = bots[i];
-      const label = bot.bot_username ? `@${bot.bot_username}` : bot.persona_id;
-      setReRegisterProgress({ current: i + 1, total: bots.length, done, failed });
-      setReRegisterLog((prev: string[]) => [...prev, `  \u23F3 ${i + 1}/${bots.length}: ${label}...`]);
-
-      try {
-        const res = await fetch("/api/admin/telegram/re-register-bots", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ persona_id: bot.persona_id }),
-        });
-        const data = await res.json();
-
-        if (data.success && data.status === "ok") {
-          done++;
-          setReRegisterLog((prev: string[]) => {
-            const next = [...prev];
-            next[next.length - 1] = `  \u2705 ${i + 1}/${bots.length}: ${label} registered`;
-            return next;
-          });
-        } else {
-          failed++;
-          setReRegisterLog((prev: string[]) => {
-            const next = [...prev];
-            next[next.length - 1] = `  \u274C ${i + 1}/${bots.length}: ${label} \u2014 ${data.message || data.error || "failed"}`;
-            return next;
-          });
-        }
-      } catch (err) {
-        failed++;
-        setReRegisterLog((prev: string[]) => {
-          const next = [...prev];
-          next[next.length - 1] = `  \u274C ${i + 1}/${bots.length}: ${label} \u2014 ${err instanceof Error ? err.message : "network error"}`;
-          return next;
-        });
-      }
-
-      setReRegisterProgress({ current: i + 1, total: bots.length, done, failed });
-
-      // Small pause between bots so we don't hit Telegram's rate limit
-      if (i < bots.length - 1) await new Promise(r => setTimeout(r, 300));
-    }
-
-    setReRegisterLog((prev: string[]) => [...prev, `\u2728 Complete: ${done}/${bots.length} succeeded, ${failed} failed`]);
-    setReRegisteringBots(false);
-  };
-
   const refreshOneWallet = async (p: Persona) => {
     // Track refreshes per-persona so clicking one button doesn't disable them all
     if (refreshingWallets.has(p.id)) return;
@@ -585,201 +534,6 @@ export default function PersonasPage() {
     }
   };
 
-  const refreshAllWallets = async () => {
-    if (bulkRefreshing) return;
-
-    setBulkRefreshLog([]);
-    setBulkRefreshProgress(null);
-
-    // Fetch the list of wallets first
-    let wallets: { id: string; username: string; display_name: string; wallet_address: string }[];
-    try {
-      const listRes = await fetch("/api/admin/personas/refresh-wallet-balances");
-      if (!listRes.ok) {
-        alert("\u274C Failed to fetch wallet list");
-        return;
-      }
-      const listData = await listRes.json();
-      wallets = listData.personas || [];
-    } catch (err) {
-      alert(`\u274C Failed: ${err instanceof Error ? err.message : "unknown"}`);
-      return;
-    }
-
-    if (wallets.length === 0) {
-      alert("No active persona wallets found to refresh.");
-      return;
-    }
-
-    const confirmed = confirm(
-      `Refresh on-chain balances for ${wallets.length} persona wallet${wallets.length === 1 ? "" : "s"}?\n\n` +
-      `Each wallet = 4 Solana RPC calls (SOL + BUDJU + USDC + GLITCH).\n` +
-      `Takes ~1-2 seconds per wallet. Progress will show below the button.\n\n` +
-      `Safe to run multiple times. No writes to Solana — read-only queries.`,
-    );
-    if (!confirmed) return;
-
-    setBulkRefreshing(true);
-    setBulkRefreshProgress({ current: 0, total: wallets.length, done: 0, failed: 0 });
-    setBulkRefreshLog([`\uD83D\uDD04 Refreshing ${wallets.length} wallets from Solana RPC...`]);
-
-    let done = 0;
-    let failed = 0;
-
-    for (let i = 0; i < wallets.length; i++) {
-      const w = wallets[i];
-      const label = `@${w.username}`;
-      setBulkRefreshProgress({ current: i + 1, total: wallets.length, done, failed });
-      setBulkRefreshLog((prev: string[]) => [...prev, `  \u23F3 ${i + 1}/${wallets.length}: ${label}...`]);
-
-      try {
-        const res = await fetch("/api/admin/personas/refresh-wallet-balances", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ persona_id: w.id }),
-        });
-        const data = await res.json();
-
-        if (data.success && data.balances) {
-          done++;
-          const b = data.balances;
-          const summary = `${b.sol.toFixed(3)} SOL \u00B7 ${b.budju.toLocaleString()} BUDJU \u00B7 ${b.usdc.toFixed(2)} USDC \u00B7 ${b.glitch.toLocaleString()} GLITCH`;
-          setBulkRefreshLog((prev: string[]) => {
-            const next = [...prev];
-            next[next.length - 1] = `  \u2705 ${i + 1}/${wallets.length}: ${label} \u2192 ${summary}`;
-            return next;
-          });
-          // Live-update the persona in the list
-          setPersonas(prev => prev.map((pp: Persona) =>
-            pp.id === w.id
-              ? { ...pp, sol_balance: b.sol, budju_balance: b.budju, usdc_balance: b.usdc, glitch_balance: b.glitch }
-              : pp,
-          ));
-        } else {
-          failed++;
-          setBulkRefreshLog((prev: string[]) => {
-            const next = [...prev];
-            next[next.length - 1] = `  \u274C ${i + 1}/${wallets.length}: ${label} \u2014 ${data.message || data.error || "failed"}`;
-            return next;
-          });
-        }
-      } catch (err) {
-        failed++;
-        setBulkRefreshLog((prev: string[]) => {
-          const next = [...prev];
-          next[next.length - 1] = `  \u274C ${i + 1}/${wallets.length}: ${label} \u2014 ${err instanceof Error ? err.message : "network error"}`;
-          return next;
-        });
-      }
-
-      setBulkRefreshProgress({ current: i + 1, total: wallets.length, done, failed });
-
-      if (i < wallets.length - 1) await new Promise(r => setTimeout(r, 300));
-    }
-
-    setBulkRefreshLog((prev: string[]) => [
-      ...prev,
-      `\u2728 Complete: ${done}/${wallets.length} refreshed, ${failed} failed`,
-    ]);
-    setBulkRefreshing(false);
-  };
-
-  const generateMissingWallets = async () => {
-    if (generatingWallets) return;
-
-    setWalletGenLog([]);
-    setWalletGenProgress(null);
-
-    // Step 1: fetch list of personas missing wallets
-    let personasMissing: { id: string; username: string; display_name: string; avatar_emoji: string | null }[];
-    try {
-      const listRes = await fetch("/api/admin/personas/generate-missing-wallets");
-      if (!listRes.ok) {
-        alert("\u274C Failed to fetch personas list");
-        return;
-      }
-      const listData = await listRes.json();
-      personasMissing = listData.personas || [];
-    } catch (err) {
-      alert(`\u274C Failed to fetch personas: ${err instanceof Error ? err.message : "unknown"}`);
-      return;
-    }
-
-    if (personasMissing.length === 0) {
-      alert("\u2705 All active personas already have a Solana wallet!");
-      return;
-    }
-
-    const confirmed = confirm(
-      `Generate Solana wallets for ${personasMissing.length} persona${personasMissing.length === 1 ? "" : "s"} missing one?\n\n` +
-      `Each wallet will be a fresh Solana keypair with zero balance.\n` +
-      `No funds are moved. Private keys stay encrypted in DB.\n\n` +
-      `Safe to run multiple times. Takes ~0.5 seconds per wallet.`,
-    );
-    if (!confirmed) return;
-
-    setGeneratingWallets(true);
-    setWalletGenProgress({ current: 0, total: personasMissing.length, done: 0, failed: 0 });
-    setWalletGenLog([`\uD83D\uDD11 Generating ${personasMissing.length} wallets...`]);
-
-    let done = 0;
-    let failed = 0;
-
-    for (let i = 0; i < personasMissing.length; i++) {
-      const persona = personasMissing[i];
-      const label = `@${persona.username}`;
-      setWalletGenProgress({ current: i + 1, total: personasMissing.length, done, failed });
-      setWalletGenLog((prev: string[]) => [...prev, `  \u23F3 ${i + 1}/${personasMissing.length}: ${label}...`]);
-
-      try {
-        const res = await fetch("/api/admin/personas/generate-missing-wallets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ persona_id: persona.id }),
-        });
-        const data = await res.json();
-
-        if (data.success && data.wallet_address) {
-          done++;
-          const shortAddr = `${data.wallet_address.slice(0, 6)}...${data.wallet_address.slice(-4)}`;
-          setWalletGenLog((prev: string[]) => {
-            const next = [...prev];
-            next[next.length - 1] = `  \u2705 ${i + 1}/${personasMissing.length}: ${label} \u2192 ${shortAddr}`;
-            return next;
-          });
-        } else {
-          failed++;
-          setWalletGenLog((prev: string[]) => {
-            const next = [...prev];
-            next[next.length - 1] = `  \u274C ${i + 1}/${personasMissing.length}: ${label} \u2014 ${data.message || data.error || "failed"}`;
-            return next;
-          });
-        }
-      } catch (err) {
-        failed++;
-        setWalletGenLog((prev: string[]) => {
-          const next = [...prev];
-          next[next.length - 1] = `  \u274C ${i + 1}/${personasMissing.length}: ${label} \u2014 ${err instanceof Error ? err.message : "network error"}`;
-          return next;
-        });
-      }
-
-      setWalletGenProgress({ current: i + 1, total: personasMissing.length, done, failed });
-
-      // Small pause to avoid overwhelming DB
-      if (i < personasMissing.length - 1) await new Promise(r => setTimeout(r, 150));
-    }
-
-    setWalletGenLog((prev: string[]) => [
-      ...prev,
-      `\u2728 Complete: ${done}/${personasMissing.length} wallets created, ${failed} failed`,
-    ]);
-    setGeneratingWallets(false);
-
-    // Refresh the personas list so the new wallet balances show up
-    try { await fetchPersonas(); } catch { /* non-critical */ }
-  };
-
   const animatePersona = async (p: Persona) => {
     if (animatingPersona) return;
     if (!p.avatar_url) { alert("This persona has no avatar image to animate."); return; }
@@ -912,113 +666,6 @@ export default function PersonasPage() {
     fetchStats();
   };
 
-  // §GLITCH Coin Promotion
-  const [promoMode, setPromoMode] = useState<"image" | "video">("image");
-  const [promoGenerating, setPromoGenerating] = useState(false);
-  const [promoLog, setPromoLog] = useState<string[]>([]);
-  const [promoSpreadResults, setPromoSpreadResults] = useState<{ platform: string; status: string; url?: string; error?: string }[]>([]);
-  const [promoComplete, setPromoComplete] = useState(false);
-  const [promoImageUrl, setPromoImageUrl] = useState<string | null>(null);
-  const promoLogRef = useRef<HTMLDivElement>(null);
-
-  const promoteGlitchCoin = async () => {
-    if (promoGenerating) return;
-    setPromoGenerating(true);
-    setPromoLog([`${promoMode === "video" ? "🎬" : "🖼️"} Generating §GLITCH promo ${promoMode}...`]);
-    setPromoSpreadResults([]);
-    setPromoComplete(false);
-    setPromoImageUrl(null);
-    try {
-      const form = new FormData();
-      form.append("mode", promoMode);
-      const res = await fetch("/api/admin/promote-glitchcoin", {
-        method: "POST",
-        body: form,
-      });
-      const data = await res.json();
-
-      if (promoMode === "image") {
-        if (data.success && data.imageUrl) {
-          setPromoImageUrl(data.imageUrl);
-          setPromoLog(prev => [...prev, "✅ Image generated!"]);
-          setPromoLog(prev => [...prev, "📡 Spreading to social media..."]);
-          if (data.spreadResults?.length > 0) {
-            setPromoSpreadResults(data.spreadResults);
-            const posted = data.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-            const failed = data.spreadResults.filter((r: { status: string }) => r.status === "failed").length;
-            setPromoLog(prev => [...prev, `📡 Sent to ${posted} platform${posted !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed)` : ""}`]);
-          } else {
-            setPromoLog(prev => [...prev, "📡 No active social media accounts configured"]);
-          }
-          setPromoLog(prev => [...prev, "🙏 Thank you Architect — §GLITCH promoted!"]);
-          setPromoComplete(true);
-        } else {
-          setPromoLog(prev => [...prev, `❌ ${data.error || "Generation failed"}`]);
-        }
-        setPromoGenerating(false);
-        return;
-      }
-
-      // Video mode — submit + poll
-      if (data.phase === "done" && data.success) {
-        setPromoLog(prev => [...prev, "✅ Video ready!", "📡 Spreading to social media..."]);
-        if (data.spreadResults?.length > 0) {
-          setPromoSpreadResults(data.spreadResults);
-          const posted = data.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-          setPromoLog(prev => [...prev, `📡 Sent to ${posted} platform${posted !== 1 ? "s" : ""}`]);
-        }
-        setPromoLog(prev => [...prev, "🙏 Thank you Architect — §GLITCH promoted!"]);
-        setPromoComplete(true);
-        setPromoGenerating(false);
-        return;
-      }
-
-      if (!data.success || !data.requestId) {
-        setPromoLog(prev => [...prev, `❌ Submit failed: ${data.error || "Unknown error"}`]);
-        setPromoGenerating(false);
-        return;
-      }
-
-      const requestId = data.requestId;
-      setPromoLog(prev => [...prev, "✅ Video submitted! Polling for completion..."]);
-
-      for (let attempt = 1; attempt <= 90; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 10_000));
-        try {
-          const pollRes = await fetch(`/api/admin/promote-glitchcoin?id=${encodeURIComponent(requestId)}`);
-          const pollData = await pollRes.json();
-
-          if (pollData.phase === "done" && pollData.success) {
-            setPromoLog(prev => [...prev, "🎉 Video ready!", "📡 Spreading to social media..."]);
-            if (pollData.spreadResults?.length > 0) {
-              setPromoSpreadResults(pollData.spreadResults);
-              const posted = pollData.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-              setPromoLog(prev => [...prev, `📡 Sent to ${posted} platform${posted !== 1 ? "s" : ""}`]);
-            }
-            setPromoLog(prev => [...prev, "🙏 Thank you Architect — §GLITCH promoted!"]);
-            setPromoComplete(true);
-            setPromoGenerating(false);
-            return;
-          }
-
-          if (pollData.status === "moderation_failed" || pollData.status === "expired" || pollData.status === "failed") {
-            setPromoLog(prev => [...prev, `❌ Video ${pollData.status}`]);
-            setPromoGenerating(false);
-            return;
-          }
-
-          if (attempt % 3 === 0) {
-            setPromoLog(prev => [...prev, `🔄 Still generating... (${pollData.status || "pending"})`]);
-          }
-        } catch { /* retry on network error */ }
-      }
-      setPromoLog(prev => [...prev, "❌ Timed out after 15 minutes"]);
-    } catch (err) {
-      setPromoLog(prev => [...prev, `❌ Error: ${err instanceof Error ? err.message : String(err)}`]);
-    }
-    setPromoGenerating(false);
-  };
-
   // Elon Campaign
   const [elonGenerating, setElonGenerating] = useState(false);
   const [elonLog, setElonLog] = useState<string[]>([]);
@@ -1144,20 +791,27 @@ export default function PersonasPage() {
         method: "POST",
         body: form,
       });
-      const data = await res.json();
+      const data = await readAdminJson(res);
       if (data.url) {
-        setPosterUrl(data.url);
+        setPosterUrl(data.url as string);
         setPosterLog(prev => [...prev, "Poster generated!"]);
         setPosterLog(prev => [...prev, "Spreading the chaos to Socials..."]);
-        if (data.spreadResults && data.spreadResults.length > 0) {
-          setPosterSpreadResults(data.spreadResults);
-          const posted = data.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-          const failed = data.spreadResults.filter((r: { status: string }) => r.status === "failed").length;
-          setPosterLog(prev => [...prev, `Sent to ${posted} platform${posted !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed)` : ""}`]);
-        } else {
-          setPosterLog(prev => [...prev, "No active social media accounts configured"]);
+
+        let spreadResults: SpreadResult[] = [];
+        if (data.spreadPending && typeof data.postId === "string") {
+          const poll = await pollArchitectSpread(data.postId, setPosterSpreadResults);
+          spreadResults = poll.results;
+          if (poll.timedOut) {
+            setPosterLog(prev => [...prev, "⏳ Spread still finishing on API — partial results shown"]);
+          }
+        } else if (Array.isArray(data.spreadResults) && data.spreadResults.length > 0) {
+          spreadResults = data.spreadResults as SpreadResult[];
+          setPosterSpreadResults(spreadResults);
         }
+
+        setPosterLog(prev => [...prev, summarizeSpreadLog(spreadResults)]);
         setPosterLog(prev => [...prev, "NOTHING MATTERS. THE POSTER IS COMPLETE."]);
+        setPosterLog(prev => [...prev, "🙏 Thank you Architect"]);
         setPosterComplete(true);
       } else {
         setPosterLog(prev => [...prev, `Generation failed: ${data.error || "Unknown error"}`]);
@@ -1179,6 +833,8 @@ export default function PersonasPage() {
   // Chaos Drops state
   const [chaosGenerating, setChaosGenerating] = useState(false);
   const [chaosLog, setChaosLog] = useState<string[]>([]);
+  const [chaosSpreadResults, setChaosSpreadResults] = useState<SpreadResult[]>([]);
+  const [chaosVideoUrl, setChaosVideoUrl] = useState<string | null>(null);
   const [chaosPreview, setChaosPreview] = useState<{
     scenario: { id: string; category: string; title: string; verticals: string[]; marketplaceCta: string };
     renderedPrompt: string;
@@ -1204,6 +860,8 @@ export default function PersonasPage() {
   const triggerChaosDrop = async () => {
     if (chaosGenerating) return;
     setChaosGenerating(true);
+    setChaosVideoUrl(null);
+    setChaosSpreadResults([]);
     setChaosLog(["🌀 Rolling chaos…"]);
     try {
       const res = await fetch("/api/generate-chaos-drop", {
@@ -1211,20 +869,67 @@ export default function PersonasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const data = await res.json();
-      if (data.success) {
-        setChaosLog([
-          `🌀 Scenario: ${data.scenarioTitle} (${data.scenario})`,
-          `🤖 Persona: @${data.persona}`,
-          `🛍️ Product: ${data.product}${data.usingMarketplace ? " (real marketplace)" : " (fictional drop)"}`,
-          `🎬 Video: ${data.videoUrl ? "rendered" : "failed"}`,
-          `📤 Spread: ${data.spreading?.length ? data.spreading.join(", ") : "no platforms configured"}`,
-          `✅ Done.`,
-        ]);
-        fetchChaosPreview();
-      } else {
-        setChaosLog([`❌ ${data.error || "Failed to drop chaos"}`]);
+      const data = await readAdminJson(res);
+      if (data.phase !== "started" || typeof data.jobId !== "string") {
+        setChaosLog([`❌ ${String(data.error || "Failed to start chaos drop")}`]);
+        setChaosGenerating(false);
+        return;
       }
+
+      const jobId = data.jobId;
+      setChaosLog((prev) => [...prev, "⏳ Grok rendering (2–4 min)…"]);
+      const deadline = Date.now() + 360_000;
+      let dropResult: Record<string, unknown> | null = null;
+
+      while (Date.now() < deadline) {
+        const pollRes = await fetch(
+          `/api/generate-chaos-drop?action=drop_status&job_id=${encodeURIComponent(jobId)}`,
+        );
+        const job = await readAdminJson(pollRes);
+        if (job.phase === "running") {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          continue;
+        }
+        if (job.phase === "failed" || job.success === false) {
+          setChaosLog([`❌ ${String(job.error || "Chaos drop failed")}`]);
+          setChaosGenerating(false);
+          return;
+        }
+        if (job.phase === "done" && job.success === true) {
+          dropResult = job;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+
+      if (!dropResult) {
+        setChaosLog((prev) => [...prev, "❌ Timed out waiting for video (6 min)"]);
+        setChaosGenerating(false);
+        return;
+      }
+
+      const videoUrl = typeof dropResult.videoUrl === "string" ? dropResult.videoUrl : null;
+      if (videoUrl) setChaosVideoUrl(videoUrl);
+
+      setChaosLog([
+        `🌀 Scenario: ${dropResult.scenarioTitle} (${dropResult.scenario})`,
+        `🤖 Persona: @${dropResult.persona}`,
+        `🛍️ Product: ${dropResult.product}${dropResult.usingMarketplace ? " (real marketplace)" : " (fictional drop)"}`,
+        `🎬 Video ready!`,
+      ]);
+
+      const postId = typeof dropResult.postId === "string" ? dropResult.postId : null;
+      if (postId) {
+        setChaosLog((prev) => [...prev, "📡 Sending to socials…"]);
+        const poll = await pollSpreadStatus(postId, setChaosSpreadResults, "/api/generate-chaos-drop");
+        setChaosLog((prev) => [...prev, summarizeSpreadLog(poll.results)]);
+        if (poll.timedOut) {
+          setChaosLog((prev) => [...prev, "⏳ Spread still finishing on API — partial results shown"]);
+        }
+      }
+
+      setChaosLog((prev) => [...prev, "✅ Chaos drop COMPLETE!"]);
+      fetchChaosPreview();
     } catch (err) {
       setChaosLog([`❌ Error: ${err instanceof Error ? err.message : "unknown"}`]);
     }
@@ -1233,23 +938,26 @@ export default function PersonasPage() {
 
   // Ad Campaign state
   const [adStyle, setAdStyle] = useState<string>("auto");
-  const [adPlatforms, setAdPlatforms] = useState<Set<string>>(new Set());
-  const [adExtend, setAdExtend] = useState(true);
-  const [adConcept, setAdConcept] = useState("");
+  const [adMediaMode, setAdMediaMode] = useState<PromoMediaMode>("video30");
   const [adGenerating, setAdGenerating] = useState(false);
   const [adPhase, setAdPhase] = useState<string>("");
   const [adLog, setAdLog] = useState<string[]>([]);
   const [adVideoUrl, setAdVideoUrl] = useState<string | null>(null);
-  const [adCaption, setAdCaption] = useState<string | null>(null);
+  const [adImageUrl, setAdImageUrl] = useState<string | null>(null);
   const [adSpreadResults, setAdSpreadResults] = useState<{ platform: string; status: string; url?: string; error?: string }[]>([]);
   const [adComplete, setAdComplete] = useState(false);
   const adLogRef = useRef<HTMLDivElement>(null);
 
-  // §GLITCH Coin Promotion — enhanced fields (match ad campaign UI)
+  // §GLITCH Coin Promotion
   const [glitchPromoStyle, setGlitchPromoStyle] = useState<string>("auto");
-  const [glitchPromoPlatforms, setGlitchPromoPlatforms] = useState<Set<string>>(new Set());
-  const [glitchPromoExtend, setGlitchPromoExtend] = useState(false);
-  const [glitchPromoConcept, setGlitchPromoConcept] = useState("");
+  const [glitchPromoMediaMode, setGlitchPromoMediaMode] = useState<PromoMediaMode>("image");
+  const [promoGenerating, setPromoGenerating] = useState(false);
+  const [promoLog, setPromoLog] = useState<string[]>([]);
+  const [promoSpreadResults, setPromoSpreadResults] = useState<SpreadResult[]>([]);
+  const [promoComplete, setPromoComplete] = useState(false);
+  const [promoImageUrl, setPromoImageUrl] = useState<string | null>(null);
+  const [promoVideoUrl, setPromoVideoUrl] = useState<string | null>(null);
+  const promoLogRef = useRef<HTMLDivElement>(null);
 
   // Custom prompt overrides (from PromptViewer edits)
   const [customPromptAd, setCustomPromptAd] = useState<string | null>(null);
@@ -1280,19 +988,25 @@ export default function PersonasPage() {
         method: "POST",
         body: form,
       });
-      const data = await res.json();
+      const data = await readAdminJson(res);
       if (data.url) {
-        setHeroUrl(data.url);
+        setHeroUrl(data.url as string);
         setHeroLog(prev => [...prev, "Image complete"]);
         setHeroLog(prev => [...prev, "Sending to Socials..."]);
-        if (data.spreadResults && data.spreadResults.length > 0) {
-          setHeroSpreadResults(data.spreadResults);
-          const posted = data.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-          const failed = data.spreadResults.filter((r: { status: string }) => r.status === "failed").length;
-          setHeroLog(prev => [...prev, `Sent to ${posted} platform${posted !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed)` : ""}`]);
-        } else {
-          setHeroLog(prev => [...prev, "No active social media accounts configured"]);
+
+        let spreadResults: SpreadResult[] = [];
+        if (data.spreadPending && typeof data.postId === "string") {
+          const poll = await pollArchitectSpread(data.postId, setHeroSpreadResults);
+          spreadResults = poll.results;
+          if (poll.timedOut) {
+            setHeroLog(prev => [...prev, "⏳ Spread still finishing on API — partial results shown"]);
+          }
+        } else if (Array.isArray(data.spreadResults) && data.spreadResults.length > 0) {
+          spreadResults = data.spreadResults as SpreadResult[];
+          setHeroSpreadResults(spreadResults);
         }
+
+        setHeroLog(prev => [...prev, summarizeSpreadLog(spreadResults)]);
         setHeroLog(prev => [...prev, "🙏 Thank you Architect"]);
         setHeroComplete(true);
       } else {
@@ -1317,280 +1031,77 @@ export default function PersonasPage() {
     { id: "minimal", label: "Minimal", icon: "◻️" },
   ] as const;
 
-  const AD_PLATFORMS = [
-    { id: "x", label: "X", icon: "𝕏" },
-    { id: "facebook", label: "Facebook", icon: "📘" },
-    { id: "instagram", label: "Instagram", icon: "📷" },
-    { id: "youtube", label: "YouTube", icon: "▶️" },
-    { id: "telegram", label: "Telegram", icon: "✈️" },
-    { id: "youtube", label: "YouTube", icon: "▶️" },
-  ] as const;
-
-  const toggleAdPlatform = (id: string) => {
-    setAdPlatforms(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+  const promoteGlitchCoinEnhanced = () =>
+    runArchitectPromo({
+      campaign: "glitch",
+      mediaMode: glitchPromoMediaMode,
+      style: glitchPromoStyle,
+      concept: "",
+      customPrompt: customPromptPromo,
+      subjectLabel: "§GLITCH promo",
+      doneMessage: "🙏 Thank you Architect — §GLITCH promoted!",
+      isRunning: promoGenerating,
+      setRunning: setPromoGenerating,
+      setLog: setPromoLog,
+      setSpreadResults: setPromoSpreadResults,
+      setComplete: setPromoComplete,
+      setImageUrl: setPromoImageUrl,
+      setVideoUrl: setPromoVideoUrl,
     });
-  };
 
-  const toggleGlitchPromoPlatform = (id: string) => {
-    setGlitchPromoPlatforms(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+  const launchAdCampaign = () =>
+    runArchitectPromo({
+      campaign: "ecosystem",
+      mediaMode: adMediaMode,
+      style: adStyle,
+      concept: "",
+      customPrompt: customPromptAd,
+      subjectLabel: "AIG!itch ad",
+      doneMessage: "🙏 Ad campaign COMPLETE!",
+      isRunning: adGenerating,
+      setRunning: setAdGenerating,
+      setLog: setAdLog,
+      setSpreadResults: setAdSpreadResults,
+      setComplete: setAdComplete,
+      setImageUrl: setAdImageUrl,
+      setVideoUrl: setAdVideoUrl,
+      setPhase: setAdPhase,
     });
-  };
 
-  const generateAd = async () => {
-    if (adGenerating) return;
-    setAdGenerating(true);
-    setAdLog(["🚀 Planning ad campaign..."]);
-    setAdPhase("planning");
-    setAdVideoUrl(null);
-    setAdCaption(null);
-    setAdSpreadResults([]);
-    setAdComplete(false);
-    try {
-      // Phase 1: Plan — get AI-generated prompt + caption
-      const planBody: Record<string, unknown> = {
-        wallet_address: "AEWvE2xXaHSGdGCaCArb2PWdKS7K9RwoCRV7CT2CJTWq",
-        plan_only: true,
-        style: adStyle,
-      };
-      if (adConcept.trim()) planBody.concept = adConcept.trim();
-
-      const planRes = await fetch("/api/generate-ads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(planBody),
-      });
-      const planData = await planRes.json();
-      if (!planData.success) {
-        setAdLog(prev => [...prev, `❌ Plan failed: ${planData.error || "Unknown error"}`]);
-        setAdGenerating(false);
-        return;
-      }
-      const adCaptionText = planData.caption || "";
-      setAdCaption(adCaptionText);
-      setAdLog(prev => [...prev,
-        `✅ Ad planned!`,
-        `🎨 Style: ${adStyle}`,
-        `📝 Caption: "${adCaptionText.slice(0, 100)}..."`,
-        `🎥 Submitting to video generation${adExtend ? " (30s Extended — 3 clips)" : ""}...`,
-      ]);
-
-      // Phase 2: Submit to backend — always 30s (3 clips generated in parallel on server)
-      setAdPhase("submitting 3 clips");
-      const submitBody: Record<string, unknown> = {
-        wallet_address: "AEWvE2xXaHSGdGCaCArb2PWdKS7K9RwoCRV7CT2CJTWq",
-        style: adStyle,
-        duration: "30s",
-        is30s: true,
-      };
-      if (adConcept.trim()) submitBody.concept = adConcept.trim();
-
-      const submitRes = await fetch("/api/generate-ads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(submitBody),
-      });
-      const submitData = await submitRes.json();
-
-      if (!submitData.success) {
-        setAdLog(prev => [...prev, `❌ Submit failed: ${submitData.error || "Unknown error"}`]);
-        setAdGenerating(false);
-        return;
-      }
-
-      // Backend returns requestIds array (3 clips submitted in parallel)
-      const requestIds = submitData.requestIds as string[];
-      if (!requestIds || requestIds.length === 0) {
-        // Fallback: single clip mode
-        const requestId = submitData.requestId;
-        if (!requestId) {
-          setAdLog(prev => [...prev, "❌ No request IDs returned"]);
-          setAdGenerating(false);
-          return;
-        }
-        // Single clip polling (shouldn't happen with 30s but just in case)
-        setAdLog(prev => [...prev, "✅ Video submitted! Polling..."]);
-        setAdPhase("rendering");
-        for (let attempt = 1; attempt <= 90; attempt++) {
-          await new Promise(resolve => setTimeout(resolve, 10_000));
-          const pollRes = await fetch(`/api/generate-ads?id=${encodeURIComponent(requestId)}&caption=${encodeURIComponent(adCaptionText)}`);
-          const pollData = await pollRes.json();
-          if (pollData.phase === "done" && pollData.success) {
-            setAdVideoUrl(pollData.videoUrl || null);
-            setAdLog(prev => [...prev, "🎉 Video ready!"]);
-            if (pollData.spreading?.length > 0) {
-              setAdSpreadResults(pollData.spreading.map((p: string) => ({ platform: p, status: "posted" })));
-              setAdLog(prev => [...prev, `📡 Spread to: ${pollData.spreading.join(", ")}`]);
-            }
-            setAdLog(prev => [...prev, "🙏 Ad campaign COMPLETE!"]);
-            setAdComplete(true);
-            setAdGenerating(false);
-            return;
-          }
-          if (pollData.phase === "done") { setAdGenerating(false); return; }
-          if (attempt % 3 === 0) setAdLog(prev => [...prev, `🔄 Still rendering... (${pollData.status || "pending"})`]);
-        }
-        setAdGenerating(false);
-        return;
-      }
-
-      setAdLog(prev => [...prev, `✅ ${requestIds.length} clips submitted to Grok IN PARALLEL! Polling...`]);
-
-      // Phase 3: Poll all clips simultaneously via ?ids=
-      setAdPhase("rendering 3 clips");
-      const idsParam = requestIds.join(",");
-
-      for (let attempt = 1; attempt <= 90; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 10_000));
-        try {
-          const pollRes = await fetch(`/api/generate-ads?ids=${encodeURIComponent(idsParam)}&caption=${encodeURIComponent(adCaptionText)}`);
-          const pollData = await pollRes.json();
-
-          if (pollData.phase === "done" && pollData.success) {
-            // Backend auto-stitched + posted + spread
-            setAdVideoUrl(pollData.videoUrl || null);
-            setAdLog(prev => [...prev, `🎉 ${pollData.clipCount || 3}-clip video ready! (${pollData.duration || 30}s)`]);
-            if (pollData.spreading?.length > 0) {
-              setAdSpreadResults(pollData.spreading.map((p: string) => ({ platform: p, status: "posted" })));
-              setAdLog(prev => [...prev, `📡 Spread to: ${pollData.spreading.join(", ")}`]);
-            }
-            if (pollData.postId) setAdLog(prev => [...prev, "✅ Posted to AIG!itch feed"]);
-            setAdLog(prev => [...prev, "🙏 30s Ad campaign COMPLETE!"]);
-            setAdComplete(true);
-            setAdGenerating(false);
-            return;
-          }
-
-          if (pollData.phase === "done") {
-            setAdLog(prev => [...prev, `❌ All clips failed: ${pollData.status || "unknown"}`]);
-            setAdGenerating(false);
-            return;
-          }
-
-          // Show per-clip progress
-          if (pollData.completed !== undefined && attempt % 2 === 0) {
-            setAdPhase(`clips ${pollData.completed}/${pollData.total} done`);
-            setAdLog(prev => [...prev, `🔄 ${pollData.completed}/${pollData.total} clips ready...`]);
-          }
-        } catch { /* retry on network error */ }
-      }
-      setAdLog(prev => [...prev, "❌ Timed out after 15 minutes"]);
-    } catch (err) {
-      setAdLog(prev => [...prev, `❌ Error: ${err instanceof Error ? err.message : String(err)}`]);
-    }
-    setAdGenerating(false);
-  };
-
-  // Enhanced §GLITCH promotion using ad campaign style
-  const promoteGlitchCoinEnhanced = async () => {
-    if (promoGenerating) return;
-    setPromoGenerating(true);
-    const mode = glitchPromoExtend ? "video" : promoMode;
-    setPromoLog([`${mode === "video" ? "🎬" : "🖼️"} Generating §GLITCH promo ${mode}...`]);
-    if (glitchPromoStyle !== "auto") setPromoLog(prev => [...prev, `🎨 Style: ${glitchPromoStyle}`]);
-    setPromoSpreadResults([]);
-    setPromoComplete(false);
-    setPromoImageUrl(null);
-    try {
-      const form = new FormData();
-      form.append("mode", mode);
-      if (glitchPromoStyle !== "auto") form.append("style", glitchPromoStyle);
-      if (glitchPromoConcept.trim()) form.append("concept", glitchPromoConcept.trim());
-      if (glitchPromoPlatforms.size > 0) form.append("target_platforms", JSON.stringify(Array.from(glitchPromoPlatforms)));
-      if (glitchPromoExtend) form.append("extend_30s", "true");
-      if (customPromptPromo) form.append("prompt", customPromptPromo);
-
-      const res = await fetch("/api/admin/promote-glitchcoin", {
-        method: "POST",
-        body: form,
-      });
-      const data = await res.json();
-
-      if (mode === "image") {
-        if (data.success && data.imageUrl) {
-          setPromoImageUrl(data.imageUrl);
-          setPromoLog(prev => [...prev, "✅ Image generated!"]);
-          setPromoLog(prev => [...prev, "📡 Spreading to social media..."]);
-          if (data.spreadResults?.length > 0) {
-            setPromoSpreadResults(data.spreadResults);
-            const posted = data.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-            const failed = data.spreadResults.filter((r: { status: string }) => r.status === "failed").length;
-            setPromoLog(prev => [...prev, `📡 Sent to ${posted} platform${posted !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed)` : ""}`]);
-          } else {
-            setPromoLog(prev => [...prev, "📡 No active social media accounts configured"]);
-          }
-          setPromoLog(prev => [...prev, "🙏 Thank you Architect — §GLITCH promoted!"]);
-          setPromoComplete(true);
-        } else {
-          setPromoLog(prev => [...prev, `❌ ${data.error || "Generation failed"}`]);
-        }
-        setPromoGenerating(false);
-        return;
-      }
-
-      // Video mode — submit + poll
-      if (data.phase === "done" && data.success) {
-        setPromoLog(prev => [...prev, "✅ Video ready!", "📡 Spreading to social media..."]);
-        if (data.spreadResults?.length > 0) {
-          setPromoSpreadResults(data.spreadResults);
-          const posted = data.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-          setPromoLog(prev => [...prev, `📡 Sent to ${posted} platform${posted !== 1 ? "s" : ""}`]);
-        }
-        setPromoLog(prev => [...prev, "🙏 Thank you Architect — §GLITCH promoted!"]);
-        setPromoComplete(true);
-        setPromoGenerating(false);
-        return;
-      }
-
-      if (!data.success || !data.requestId) {
-        setPromoLog(prev => [...prev, `❌ Submit failed: ${data.error || "Unknown error"}`]);
-        setPromoGenerating(false);
-        return;
-      }
-
-      const requestId = data.requestId;
-      setPromoLog(prev => [...prev, "✅ Video submitted! Polling for completion..."]);
-
-      for (let attempt = 1; attempt <= 90; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 10_000));
-        try {
-          const pollRes = await fetch(`/api/admin/promote-glitchcoin?id=${encodeURIComponent(requestId)}`);
-          const pollData = await pollRes.json();
-
-          if (pollData.phase === "done" && pollData.success) {
-            setPromoLog(prev => [...prev, "🎉 Video ready!", "📡 Spreading to social media..."]);
-            if (pollData.spreadResults?.length > 0) {
-              setPromoSpreadResults(pollData.spreadResults);
-              const posted = pollData.spreadResults.filter((r: { status: string }) => r.status === "posted").length;
-              setPromoLog(prev => [...prev, `📡 Sent to ${posted} platform${posted !== 1 ? "s" : ""}`]);
-            }
-            setPromoLog(prev => [...prev, "🙏 Thank you Architect — §GLITCH promoted!"]);
-            setPromoComplete(true);
-            setPromoGenerating(false);
-            return;
-          }
-
-          if (pollData.status === "moderation_failed" || pollData.status === "expired" || pollData.status === "failed") {
-            setPromoLog(prev => [...prev, `❌ Video ${pollData.status}`]);
-            setPromoGenerating(false);
-            return;
-          }
-
-          if (attempt % 3 === 0) {
-            setPromoLog(prev => [...prev, `🔄 Still generating... (${pollData.status || "pending"})`]);
-          }
-        } catch { /* retry on network error */ }
-      }
-      setPromoLog(prev => [...prev, "❌ Timed out after 15 minutes"]);
-    } catch (err) {
-      setPromoLog(prev => [...prev, `❌ Error: ${err instanceof Error ? err.message : String(err)}`]);
-    }
-    setPromoGenerating(false);
+  const renderMediaModePicker = (
+    mediaMode: PromoMediaMode,
+    setMediaMode: (mode: PromoMediaMode) => void,
+    disabled: boolean,
+    accent: "green" | "orange",
+  ) => {
+    const active =
+      accent === "green"
+        ? "bg-green-500/30 border-green-400/60 text-green-300 shadow-[0_0_8px_rgba(34,197,94,0.3)]"
+        : "bg-orange-500/30 border-orange-400/60 text-orange-300 shadow-[0_0_8px_rgba(249,115,22,0.3)]";
+    const idle =
+      accent === "green"
+        ? "bg-gray-800/50 border-gray-600/30 text-gray-400 hover:border-green-500/40 hover:text-green-400"
+        : "bg-gray-800/50 border-gray-600/30 text-gray-400 hover:border-orange-500/40 hover:text-orange-400";
+    return (
+      <div className="mb-3">
+        <p className="text-[10px] text-gray-400 mb-1.5 font-bold">📦 MODE:</p>
+        <div className="flex flex-wrap gap-1.5">
+          {PROMO_MEDIA_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setMediaMode(m.id)}
+              disabled={disabled}
+              className={`px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all border ${
+                mediaMode === m.id ? active : idle
+              } disabled:opacity-40`}
+            >
+              {m.icon} {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1649,9 +1160,11 @@ export default function PersonasPage() {
                 <div className="mt-1.5 space-y-1 border-t border-yellow-500/20 pt-1.5">
                   {heroSpreadResults.map((r, i) => (
                     <div key={i} className={`flex items-center gap-2 text-[10px] ${
-                      r.status === "posted" ? "text-green-400" : "text-red-400"
+                      r.status === "posted" ? "text-green-400" :
+                      r.status === "posting" ? "text-amber-400" :
+                      "text-red-400"
                     }`}>
-                      <span>{r.status === "posted" ? "✅" : "❌"}</span>
+                      <span>{r.status === "posted" ? "✅" : r.status === "posting" ? "⏳" : "❌"}</span>
                       <span className="font-bold capitalize">{r.platform}</span>
                       {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline truncate">{r.url}</a>}
                       {r.error && <span className="truncate">{r.error}</span>}
@@ -1786,6 +1299,7 @@ export default function PersonasPage() {
                 line.includes("failed") || line.startsWith("Error") || line.startsWith("Generation failed") ? "text-red-400" :
                 line === "Poster generated!" ? "text-green-400" :
                 line.includes("NOTHING MATTERS") ? "text-pink-400 font-bold text-sm" :
+                line.includes("Thank you Architect") ? "text-yellow-400 font-bold text-sm" :
                 line.startsWith("Sent to") ? "text-green-400" :
                 "text-gray-300"
               }`}>{line}</p>
@@ -1797,9 +1311,11 @@ export default function PersonasPage() {
               <div className="mt-1.5 space-y-1 border-t border-pink-500/20 pt-1.5">
                 {posterSpreadResults.map((r, i) => (
                   <div key={i} className={`flex items-center gap-2 text-[10px] ${
-                    r.status === "posted" ? "text-green-400" : "text-red-400"
+                    r.status === "posted" ? "text-green-400" :
+                    r.status === "posting" ? "text-amber-400" :
+                    "text-red-400"
                   }`}>
-                    <span>{r.status === "posted" ? "✅" : "❌"}</span>
+                    <span>{r.status === "posted" ? "✅" : r.status === "posting" ? "⏳" : "❌"}</span>
                     <span className="font-bold capitalize">{r.platform}</span>
                     {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline truncate">{r.url}</a>}
                     {r.error && <span className="truncate">{r.error}</span>}
@@ -1925,7 +1441,7 @@ export default function PersonasPage() {
           <p className="text-[10px] text-gray-400 mb-1.5 font-bold">🎨 STYLE:</p>
           <div className="flex flex-wrap gap-1.5">
             {AD_STYLES.map(s => (
-              <button key={s.id} onClick={() => setGlitchPromoStyle(s.id)} disabled={promoGenerating}
+              <button key={s.id} onClick={() => { setGlitchPromoStyle(s.id); setCustomPromptPromo(null); }} disabled={promoGenerating}
                 className={`px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all border ${
                   glitchPromoStyle === s.id
                     ? "bg-green-500/30 border-green-400/60 text-green-300 shadow-[0_0_8px_rgba(34,197,94,0.3)]"
@@ -1936,59 +1452,27 @@ export default function PersonasPage() {
             ))}
           </div>
         </div>
-        {/* Platform Selector */}
-        <div className="mb-3">
-          <p className="text-[10px] text-gray-400 mb-1.5 font-bold">📡 TARGET PLATFORMS:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {AD_PLATFORMS.map(p => (
-              <button key={p.id} onClick={() => toggleGlitchPromoPlatform(p.id)} disabled={promoGenerating}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all border ${
-                  glitchPromoPlatforms.has(p.id)
-                    ? "bg-green-500/30 border-green-400/60 text-green-300 shadow-[0_0_8px_rgba(34,197,94,0.3)]"
-                    : "bg-gray-800/50 border-gray-600/30 text-gray-400 hover:border-green-500/40 hover:text-green-400"
-                } disabled:opacity-40`}>
-                {p.icon} {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {/* Duration + Mode */}
-        <div className="mb-3 flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <p className="text-[10px] text-gray-400 font-bold">📦 MODE:</p>
-            <select value={promoMode} onChange={(e) => setPromoMode(e.target.value as "image" | "video")}
-              className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-[10px] text-white">
-              <option value="image">🖼️ Image</option>
-              <option value="video">🎬 Video</option>
-            </select>
-          </div>
-          {promoMode === "video" && (
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={glitchPromoExtend} onChange={(e) => setGlitchPromoExtend(e.target.checked)}
-                className="w-3.5 h-3.5 accent-green-500" />
-              <span className="text-[10px] text-gray-400">30s Extended (Grok Extend)</span>
-            </label>
-          )}
-        </div>
-        {/* Concept Input */}
-        <div className="mb-3">
-          <p className="text-[10px] text-gray-400 mb-1 font-bold">💡 CONCEPT (optional):</p>
-          <textarea value={glitchPromoConcept} onChange={(e) => setGlitchPromoConcept(e.target.value)}
-            placeholder="Custom promo concept... (leave empty for AI-generated)"
-            rows={2} disabled={promoGenerating}
-            className="w-full px-3 py-2 bg-gray-800/60 border border-gray-700 rounded-lg text-[10px] text-white placeholder-gray-600 focus:outline-none focus:border-green-500 resize-none disabled:opacity-40" />
-        </div>
+        {renderMediaModePicker(
+          glitchPromoMediaMode,
+          (mode) => { setGlitchPromoMediaMode(mode); setCustomPromptPromo(null); },
+          promoGenerating,
+          "green",
+        )}
         {/* Prompt Viewer */}
         <div className="mb-3">
+          <p className="text-[10px] text-gray-400 mb-1.5 font-bold">📝 PROMPT:</p>
           <PromptViewer
             label="Promo Prompt"
             accent="green"
+            defaultOpen
             disabled={promoGenerating}
             customPrompt={customPromptPromo}
             onPromptChange={setCustomPromptPromo}
+            reloadKey={`${glitchPromoStyle}|${glitchPromoMediaMode}`}
             fetchPrompt={async () => {
-              const mode = glitchPromoExtend ? "video" : "image";
-              const res = await fetch(`/api/admin/promote-glitchcoin?action=preview_prompt&mode=${mode}`);
+              const res = await fetch(
+                buildPromoPreviewUrl("glitch", glitchPromoMediaMode, glitchPromoStyle, ""),
+              );
               const data = await res.json();
               return data.prompt || "Failed to load prompt";
             }}
@@ -1997,7 +1481,7 @@ export default function PersonasPage() {
         {/* Launch Button */}
         <div className="flex justify-end mb-3 gap-2">
           {promoComplete && (
-            <button onClick={() => { setPromoLog([]); setPromoSpreadResults([]); setPromoComplete(false); setPromoImageUrl(""); }}
+            <button onClick={() => { setPromoLog([]); setPromoSpreadResults([]); setPromoComplete(false); setPromoImageUrl(null); setPromoVideoUrl(null); }}
               disabled={promoGenerating}
               className="px-3 py-2 bg-gray-800/60 border border-gray-600/50 text-gray-400 font-bold rounded-lg text-[10px] hover:bg-gray-700/60 hover:text-white disabled:opacity-50 transition-all">
               🔄 Clear
@@ -2028,12 +1512,13 @@ export default function PersonasPage() {
               <div className="mt-1.5 space-y-1 border-t border-green-500/20 pt-1.5">
                 {promoSpreadResults.map((r, i) => (
                   <div key={i} className={`flex items-center gap-2 text-[10px] ${
-                    r.status === "posted" ? "text-green-400" : "text-red-400"
+                    r.status === "posted" ? "text-green-400" :
+                    r.status === "posting" ? "text-yellow-400" : "text-red-400"
                   }`}>
-                    <span>{r.status === "posted" ? "✅" : "❌"}</span>
+                    <span>{r.status === "posted" ? "✅" : r.status === "posting" ? "⏳" : "❌"}</span>
                     <span className="font-bold capitalize">{r.platform}</span>
                     {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline truncate">{r.url}</a>}
-                    {r.error && <span className="truncate">{r.error}</span>}
+                    {r.error && <span className={`truncate ${r.status === "posted" ? "text-yellow-500/80" : ""}`}>{r.error}</span>}
                   </div>
                 ))}
               </div>
@@ -2041,12 +1526,22 @@ export default function PersonasPage() {
           </div>
         )}
         {/* Result Card */}
-        {promoImageUrl && (
+        {(promoImageUrl || promoVideoUrl) && (
           <div className="mt-3 bg-gray-800/30 rounded-lg p-3 border border-green-500/20">
             <p className="text-[10px] text-green-400 font-bold mb-1">Result:</p>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={promoImageUrl} alt="§GLITCH Promo" className="w-full max-w-md rounded-lg" />
-            <p className="text-[10px] text-gray-500 mt-1 break-all">{promoImageUrl}</p>
+            {promoImageUrl && (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={promoImageUrl} alt="§GLITCH Promo" className="w-full max-w-md rounded-lg" />
+                <p className="text-[10px] text-gray-500 mt-1 break-all">{promoImageUrl}</p>
+              </>
+            )}
+            {promoVideoUrl && (
+              <div className={promoImageUrl ? "mt-2" : ""}>
+                <video src={promoVideoUrl} controls className="w-full max-w-md rounded-lg" />
+                <p className="text-[10px] text-gray-500 mt-1 break-all">{promoVideoUrl}</p>
+              </div>
+            )}
           </div>
         )}
         </div>}
@@ -2066,10 +1561,10 @@ export default function PersonasPage() {
         {adCampaignOpen && <div className="px-4 pb-4">
         {/* Style Picker Grid */}
         <div className="mb-3">
-          <p className="text-[10px] text-gray-400 mb-1.5 font-bold">🎨 AD STYLE:</p>
+          <p className="text-[10px] text-gray-400 mb-1.5 font-bold">🎨 STYLE:</p>
           <div className="flex flex-wrap gap-1.5">
             {AD_STYLES.map(s => (
-              <button key={s.id} onClick={() => setAdStyle(s.id)} disabled={adGenerating}
+              <button key={s.id} onClick={() => { setAdStyle(s.id); setCustomPromptAd(null); }} disabled={adGenerating}
                 className={`px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all border ${
                   adStyle === s.id
                     ? "bg-orange-500/30 border-orange-400/60 text-orange-300 shadow-[0_0_8px_rgba(249,115,22,0.3)]"
@@ -2080,66 +1575,42 @@ export default function PersonasPage() {
             ))}
           </div>
         </div>
-        {/* Platform Selector */}
-        <div className="mb-3">
-          <p className="text-[10px] text-gray-400 mb-1.5 font-bold">📡 TARGET PLATFORMS (select none for all):</p>
-          <div className="flex flex-wrap gap-1.5">
-            {AD_PLATFORMS.map(p => (
-              <button key={p.id} onClick={() => toggleAdPlatform(p.id)} disabled={adGenerating}
-                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-all border ${
-                  adPlatforms.has(p.id)
-                    ? "bg-orange-500/30 border-orange-400/60 text-orange-300 shadow-[0_0_8px_rgba(249,115,22,0.3)]"
-                    : "bg-gray-800/50 border-gray-600/30 text-gray-400 hover:border-orange-500/40 hover:text-orange-400"
-                } disabled:opacity-40`}>
-                {p.icon} {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {/* Duration — always 30s */}
-        <div className="mb-3 flex items-center gap-4 flex-wrap">
-          <p className="text-[10px] text-gray-400 font-bold">⏱️ DURATION:</p>
-          <div className="px-3 py-1.5 rounded-lg text-[10px] font-bold border bg-orange-500/30 border-orange-400/60 text-orange-300">
-            30s Extended (3 clips)
-          </div>
-        </div>
-        {/* Concept Input */}
-        <div className="mb-3">
-          <p className="text-[10px] text-gray-400 mb-1 font-bold">💡 CONCEPT (optional):</p>
-          <textarea value={adConcept} onChange={(e) => setAdConcept(e.target.value)}
-            placeholder="Custom ad concept... e.g. 'Join us on TikTok — swap SOL for $GLITCH now!'"
-            rows={2} disabled={adGenerating}
-            className="w-full px-3 py-2 bg-gray-800/60 border border-gray-700 rounded-lg text-[10px] text-white placeholder-gray-600 focus:outline-none focus:border-orange-500 resize-none disabled:opacity-40" />
-        </div>
+        {renderMediaModePicker(
+          adMediaMode,
+          (mode) => { setAdMediaMode(mode); setCustomPromptAd(null); },
+          adGenerating,
+          "orange",
+        )}
         {/* Prompt Viewer */}
         <div className="mb-3">
+          <p className="text-[10px] text-gray-400 mb-1.5 font-bold">📝 PROMPT:</p>
           <PromptViewer
             label="Ad Prompt"
             accent="orange"
+            defaultOpen
             disabled={adGenerating}
             customPrompt={customPromptAd}
             onPromptChange={setCustomPromptAd}
+            reloadKey={`${adStyle}|${adMediaMode}`}
             fetchPrompt={async () => {
-              const res = await fetch("/api/generate-ads", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ wallet_address: "AEWvE2xXaHSGdGCaCArb2PWdKS7K9RwoCRV7CT2CJTWq", plan_only: true, style: adStyle, concept: adConcept.trim() || undefined }),
-              });
+              const res = await fetch(
+                buildPromoPreviewUrl("ecosystem", adMediaMode, adStyle, ""),
+              );
               const data = await res.json();
-              return data.prompt || data.caption || "Failed to load prompt";
+              return data.prompt || "Failed to load prompt";
             }}
           />
         </div>
         {/* Launch Button */}
         <div className="flex justify-end mb-3 gap-2">
           {adComplete && (
-            <button onClick={() => { setAdLog([]); setAdVideoUrl(null); setAdCaption(null); setAdSpreadResults([]); setAdComplete(false); setAdPhase(""); }}
+            <button onClick={() => { setAdLog([]); setAdVideoUrl(null); setAdImageUrl(null); setAdSpreadResults([]); setAdComplete(false); setAdPhase(""); }}
               disabled={adGenerating}
               className="px-3 py-2 bg-gray-800/60 border border-gray-600/50 text-gray-400 font-bold rounded-lg text-[10px] hover:bg-gray-700/60 hover:text-white disabled:opacity-50 transition-all">
               🔄 Clear
             </button>
           )}
-          <button onClick={generateAd} disabled={adGenerating}
+          <button onClick={launchAdCampaign} disabled={adGenerating}
             className="px-6 py-2 bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 text-white font-bold rounded-lg text-xs hover:opacity-90 disabled:opacity-50 transition-opacity">
             {adGenerating ? `⏳ ${adPhase || "Working"}...` : "🚀 LAUNCH AD CAMPAIGN"}
           </button>
@@ -2164,12 +1635,13 @@ export default function PersonasPage() {
               <div className="mt-1.5 space-y-1 border-t border-orange-500/20 pt-1.5">
                 {adSpreadResults.map((r, i) => (
                   <div key={i} className={`flex items-center gap-2 text-[10px] ${
-                    r.status === "posted" ? "text-green-400" : "text-red-400"
+                    r.status === "posted" ? "text-green-400" :
+                    r.status === "posting" ? "text-yellow-400" : "text-red-400"
                   }`}>
-                    <span>{r.status === "posted" ? "✅" : "❌"}</span>
+                    <span>{r.status === "posted" ? "✅" : r.status === "posting" ? "⏳" : "❌"}</span>
                     <span className="font-bold capitalize">{r.platform}</span>
                     {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline truncate">{r.url}</a>}
-                    {r.error && <span className="truncate">{r.error}</span>}
+                    {r.error && <span className={`truncate ${r.status === "posted" ? "text-yellow-500/80" : ""}`}>{r.error}</span>}
                   </div>
                 ))}
               </div>
@@ -2177,18 +1649,20 @@ export default function PersonasPage() {
           </div>
         )}
         {/* Result Card */}
-        {adComplete && (adVideoUrl || adCaption) && (
+        {(adImageUrl || adVideoUrl) && (
           <div className="mt-3 bg-gray-800/30 rounded-lg p-3 border border-orange-500/20">
             <p className="text-[10px] text-orange-400 font-bold mb-2">Result:</p>
+            {adImageUrl && (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={adImageUrl} alt="Ad campaign" className="w-full max-w-md rounded-lg mb-2" />
+                <p className="text-[10px] text-gray-500 mb-2 break-all">{adImageUrl}</p>
+              </>
+            )}
             {adVideoUrl && (
-              <div className="mb-2">
+              <div>
                 <video src={adVideoUrl} controls className="w-full max-w-md rounded-lg" />
                 <p className="text-[10px] text-gray-500 mt-1 break-all">{adVideoUrl}</p>
-              </div>
-            )}
-            {adCaption && (
-              <div className="bg-black/20 rounded p-2">
-                <p className="text-[10px] text-gray-300">{adCaption}</p>
               </div>
             )}
           </div>
@@ -2387,6 +1861,29 @@ export default function PersonasPage() {
               {chaosGenerating && (
                 <p className="text-xs font-mono text-fuchsia-400 animate-pulse">⏳ Working… (2-4 min)</p>
               )}
+              {chaosSpreadResults.length > 0 && (
+                <div className="mt-1.5 space-y-1 border-t border-fuchsia-500/20 pt-1.5">
+                  {chaosSpreadResults.map((r, i) => (
+                    <div key={i} className={`flex items-center gap-2 text-[10px] ${
+                      r.status === "posted" ? "text-green-400" :
+                      r.status === "posting" ? "text-yellow-400" : "text-red-400"
+                    }`}>
+                      <span>{r.status === "posted" ? "✅" : r.status === "posting" ? "⏳" : "❌"}</span>
+                      <span className="font-bold capitalize">{r.platform}</span>
+                      {r.url && <a href={r.url} target="_blank" rel="noopener noreferrer" className="underline truncate">{r.url}</a>}
+                      {r.error && <span className={`truncate ${r.status === "posted" ? "text-yellow-500/80" : ""}`}>{r.error}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {chaosVideoUrl && (
+            <div className="mt-3 bg-gray-800/30 rounded-lg p-3 border border-fuchsia-500/20">
+              <p className="text-[10px] text-fuchsia-400 font-bold mb-1">Result:</p>
+              <video src={chaosVideoUrl} controls className="w-full max-w-xs rounded-lg" />
+              <p className="text-[10px] text-gray-500 mt-1 break-all">{chaosVideoUrl}</p>
             </div>
           )}
 
@@ -2395,165 +1892,6 @@ export default function PersonasPage() {
           </p>
         </div>}
       </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          MAINTENANCE TOOLS (collapsible)
-          One-click operations that are rarely needed day-to-day. Kept
-          behind a <details> so they're out of the way but still one click
-          away when something breaks or a new persona needs bootstrapping.
-          ══════════════════════════════════════════════════════════════════ */}
-      <details className="bg-gray-900/50 border border-gray-800 rounded-xl mb-3 group">
-        <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 hover:bg-gray-800/40 rounded-xl">
-          <span className="text-lg">{"\uD83D\uDEE0\uFE0F"}</span>
-          <span className="text-sm font-bold text-gray-300">Maintenance Tools</span>
-          <span className="text-[10px] text-gray-500 flex-1">Bot webhooks · wallet generation · balance refresh</span>
-          <span className="text-xs text-gray-500 group-open:rotate-180 transition-transform">{"\u25BC"}</span>
-        </summary>
-        <div className="p-3 pt-1 space-y-3">
-
-      {/* Re-register Telegram Bots — migrates existing bots to new allowed_updates */}
-      <div className="bg-gradient-to-r from-sky-900/20 to-gray-900 border border-sky-800/40 rounded-xl p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-lg">{"\u2708\uFE0F"}</span>
-          <h3 className="text-sm font-bold text-sky-400">Telegram Bot Maintenance</h3>
-          <span className="text-[10px] text-gray-500">Re-register webhooks for all existing persona bots</span>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={reRegisterTelegramBots}
-            disabled={reRegisteringBots}
-            className="px-4 py-1.5 bg-sky-500/30 hover:bg-sky-500/50 text-sky-200 rounded-lg text-xs font-bold disabled:opacity-40"
-          >
-            {reRegisteringBots
-              ? (reRegisterProgress
-                  ? `\u2708\uFE0F ${reRegisterProgress.current}/${reRegisterProgress.total}...`
-                  : `\u2708\uFE0F Re-registering...`)
-              : `\u2708\uFE0F Re-register All Bots`}
-          </button>
-          {reRegisterProgress && (
-            <div className="flex-1 min-w-[150px] max-w-xs">
-              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-sky-400 to-green-400 transition-all"
-                  style={{ width: `${reRegisterProgress.total > 0 ? (reRegisterProgress.current / reRegisterProgress.total) * 100 : 0}%` }}
-                />
-              </div>
-              <p className="text-[10px] text-gray-500 mt-1">
-                {reRegisterProgress.current} / {reRegisterProgress.total}
-                {reRegisterProgress.done > 0 && ` \u00B7 \u2705 ${reRegisterProgress.done}`}
-                {reRegisterProgress.failed > 0 && ` \u00B7 \u274C ${reRegisterProgress.failed}`}
-              </p>
-            </div>
-          )}
-        </div>
-        {reRegisterLog.length > 0 && (
-          <div className="mt-3 bg-black/60 border border-sky-900/50 rounded-lg p-2 max-h-48 overflow-y-auto font-mono">
-            {reRegisterLog.map((line: string, i: number) => (
-              <p key={i} className="text-[10px] text-gray-300 whitespace-pre-wrap">{line}</p>
-            ))}
-          </div>
-        )}
-        <p className="text-[10px] text-gray-600 mt-2">
-          {"\uD83D\uDCA1"} Run this ONCE after deploying emoji reaction support so existing persona bots subscribe to <code className="text-sky-300">message_reaction</code> webhook updates. Newly-hatched bots get this automatically.
-        </p>
-      </div>
-
-      {/* Generate Missing Wallets — creates Solana wallets for personas that don't have one */}
-      <div className="bg-gradient-to-r from-amber-900/20 to-gray-900 border border-amber-800/40 rounded-xl p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-lg">{"\uD83D\uDD11"}</span>
-          <h3 className="text-sm font-bold text-amber-400">Solana Wallet Generation</h3>
-          <span className="text-[10px] text-gray-500">Create wallets for personas that don&apos;t have one</span>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={generateMissingWallets}
-            disabled={generatingWallets}
-            className="px-4 py-1.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 rounded-lg text-xs font-bold disabled:opacity-40"
-          >
-            {generatingWallets
-              ? (walletGenProgress
-                  ? `\uD83D\uDD11 ${walletGenProgress.current}/${walletGenProgress.total}...`
-                  : `\uD83D\uDD11 Generating...`)
-              : `\uD83D\uDD11 Generate Missing Wallets`}
-          </button>
-          {walletGenProgress && (
-            <div className="flex-1 min-w-[150px] max-w-xs">
-              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-400 to-green-400 transition-all"
-                  style={{ width: `${walletGenProgress.total > 0 ? (walletGenProgress.current / walletGenProgress.total) * 100 : 0}%` }}
-                />
-              </div>
-              <p className="text-[10px] text-gray-500 mt-1">
-                {walletGenProgress.current} / {walletGenProgress.total}
-                {walletGenProgress.done > 0 && ` \u00B7 \u2705 ${walletGenProgress.done}`}
-                {walletGenProgress.failed > 0 && ` \u00B7 \u274C ${walletGenProgress.failed}`}
-              </p>
-            </div>
-          )}
-        </div>
-        {walletGenLog.length > 0 && (
-          <div className="mt-3 bg-black/60 border border-amber-900/50 rounded-lg p-2 max-h-48 overflow-y-auto font-mono">
-            {walletGenLog.map((line: string, i: number) => (
-              <p key={i} className="text-[10px] text-gray-300 whitespace-pre-wrap">{line}</p>
-            ))}
-          </div>
-        )}
-        <p className="text-[10px] text-gray-600 mt-2">
-          {"\uD83D\uDCA1"} Creates a fresh Solana keypair (zero balance) for every active persona missing a <code className="text-amber-300">budju_wallets</code> row. Run this so every persona can share their wallet address in chat. Existing wallets are untouched. Safe to run multiple times.
-        </p>
-      </div>
-
-      {/* Refresh Wallet Balances — queries Solana RPC for real on-chain balances */}
-      <div className="bg-gradient-to-r from-cyan-900/20 to-gray-900 border border-cyan-800/40 rounded-xl p-3">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-lg">{"\uD83D\uDD04"}</span>
-          <h3 className="text-sm font-bold text-cyan-400">Refresh Wallet Balances</h3>
-          <span className="text-[10px] text-gray-500">Query Solana RPC for real on-chain balances (SOL/BUDJU/USDC/GLITCH)</span>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={refreshAllWallets}
-            disabled={bulkRefreshing}
-            className="px-4 py-1.5 bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-200 rounded-lg text-xs font-bold disabled:opacity-40"
-          >
-            {bulkRefreshing
-              ? (bulkRefreshProgress
-                  ? `\uD83D\uDD04 ${bulkRefreshProgress.current}/${bulkRefreshProgress.total}...`
-                  : `\uD83D\uDD04 Refreshing...`)
-              : `\uD83D\uDD04 Refresh All Wallets`}
-          </button>
-          {bulkRefreshProgress && (
-            <div className="flex-1 min-w-[150px] max-w-xs">
-              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-400 to-green-400 transition-all"
-                  style={{ width: `${bulkRefreshProgress.total > 0 ? (bulkRefreshProgress.current / bulkRefreshProgress.total) * 100 : 0}%` }}
-                />
-              </div>
-              <p className="text-[10px] text-gray-500 mt-1">
-                {bulkRefreshProgress.current} / {bulkRefreshProgress.total}
-                {bulkRefreshProgress.done > 0 && ` \u00B7 \u2705 ${bulkRefreshProgress.done}`}
-                {bulkRefreshProgress.failed > 0 && ` \u00B7 \u274C ${bulkRefreshProgress.failed}`}
-              </p>
-            </div>
-          )}
-        </div>
-        {bulkRefreshLog.length > 0 && (
-          <div className="mt-3 bg-black/60 border border-cyan-900/50 rounded-lg p-2 max-h-48 overflow-y-auto font-mono">
-            {bulkRefreshLog.map((line: string, i: number) => (
-              <p key={i} className="text-[10px] text-gray-300 whitespace-pre-wrap">{line}</p>
-            ))}
-          </div>
-        )}
-        <p className="text-[10px] text-gray-600 mt-2">
-          {"\uD83D\uDCA1"} Read-only Solana RPC queries. Updates the cached SOL/BUDJU/USDC/GLITCH columns in <code className="text-cyan-300">budju_wallets</code>. Run this after sending real funds to a persona wallet so they can report the correct balance in chat. You can also refresh individual wallets via the {"\uD83D\uDD04"} button on each persona card.
-        </p>
-      </div>
-
-        </div>
-      </details>
 
       <div className="space-y-3">
         {personas.map((p) => (

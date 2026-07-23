@@ -1,14 +1,42 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useAdmin } from "../AdminContext";
-import type { UserDetail } from "../admin-types";
+import type { User, UserDetail } from "../admin-types";
+import {
+  classifyMeatBag,
+  connectionLabel,
+  filterUsers,
+  isArchitectUser,
+  MEATBAG_SEGMENT_META,
+  segmentUsers,
+  splitArchitectUsers,
+  type MeatBagFilter,
+  type MeatBagSegment,
+} from "@/lib/meatbag-segments";
+
+const SEGMENT_ORDER: MeatBagSegment[] = ["anonymous", "wallet", "connected"];
+
+const DEFAULT_SECTION_OPEN: Record<MeatBagSegment, boolean> = {
+  anonymous: true,
+  wallet: false,
+  connected: false,
+};
+
+const FILTER_PILLS: { id: MeatBagFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "anonymous", label: "🧑 Anonymous" },
+  { id: "wallet", label: "👛 Wallet" },
+  { id: "connected", label: "🔗 Signed In" },
+];
 
 export default function UsersPage() {
   const { authenticated, users, fetchUsers } = useAdmin();
 
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
   const [userSearch, setUserSearch] = useState("");
+  const [segmentFilter, setSegmentFilter] = useState<MeatBagFilter>("all");
+  const [sectionOpen, setSectionOpen] = useState(DEFAULT_SECTION_OPEN);
   const [editingUser, setEditingUser] = useState<{ id: string; display_name: string; username: string; bio: string; avatar_emoji: string; is_active: boolean } | null>(null);
   const [userActionLoading, setUserActionLoading] = useState(false);
 
@@ -58,6 +86,107 @@ export default function UsersPage() {
     setUserActionLoading(false);
   };
 
+  const filteredUsers = useMemo(
+    () => filterUsers(users, userSearch),
+    [users, userSearch],
+  );
+  const { architect, rest: filteredRest } = useMemo(
+    () => splitArchitectUsers(filteredUsers),
+    [filteredUsers],
+  );
+  const segmentedUsers = useMemo(
+    () => segmentUsers(filteredUsers),
+    [filteredUsers],
+  );
+  const segmentCounts = useMemo(
+    () => segmentUsers(users),
+    [users],
+  );
+  const architectAccount = useMemo(
+    () => users.find(isArchitectUser) ?? null,
+    [users],
+  );
+  const meatBagCount = architectAccount ? users.length - 1 : users.length;
+
+  const renderUserCard = (u: User) => (
+    <div
+      key={u.id}
+      className={`bg-gray-900 border rounded-xl p-3 sm:p-4 cursor-pointer hover:border-purple-500/50 transition-colors ${selectedUser?.id === u.id ? "border-purple-500/50" : "border-gray-800"}`}
+      onClick={() => fetchUserDetail(u.id)}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xl shrink-0">{u.avatar_emoji}</span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-bold text-xs sm:text-sm text-gray-300 truncate">{u.display_name}</p>
+              {!u.is_active && (
+                <span className="px-1 py-0.5 bg-red-500/20 text-red-400 rounded text-[10px] font-bold">OFF</span>
+              )}
+              {classifyMeatBag(u) === "connected" && (
+                <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 rounded text-[10px] font-bold">
+                  {connectionLabel(u)}
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] sm:text-xs text-gray-500">@{u.username}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="text-right">
+            <div className="flex gap-2 text-xs">
+              <span title="Likes">❤️ {u.likes}</span>
+              <span title="Comments">💬 {u.comments}</span>
+              <span title="NFTs">🎴 {u.nfts}</span>
+              <span title="Coins">🪙 {u.coin_balance.toLocaleString()}</span>
+            </div>
+            <p className="text-[10px] text-gray-500">{new Date(u.last_seen).toLocaleDateString()}</p>
+          </div>
+          {classifyMeatBag(u) === "wallet" && (
+            <span title="Phantom wallet" className="text-purple-400 text-sm">👛</span>
+          )}
+          {u.auth_provider === "google" && <span title="Google" className="text-sm">🔵</span>}
+          {u.auth_provider === "github" && <span title="GitHub" className="text-sm">🐙</span>}
+          {(u.auth_provider === "twitter" || u.auth_provider === "x") && (
+            <span title="X" className="text-sm">𝕏</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderSegmentBlock = (segment: MeatBagSegment) => {
+    const list = segmentedUsers[segment];
+    if (list.length === 0) return null;
+    const meta = MEATBAG_SEGMENT_META[segment];
+    const open = sectionOpen[segment];
+    return (
+      <section key={segment} className="border border-gray-800 rounded-xl overflow-hidden">
+        <button
+          type="button"
+          onClick={() =>
+            setSectionOpen((prev) => ({ ...prev, [segment]: !prev[segment] }))
+          }
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 sm:px-4 bg-gray-900/80 hover:bg-gray-800/60 transition-colors text-left"
+        >
+          <h3 className="text-xs font-bold text-gray-300">
+            {meta.icon} {meta.label}
+            <span className="ml-2 text-gray-500 font-normal">({list.length})</span>
+          </h3>
+          <div className="flex items-center gap-2 shrink-0">
+            <p className="text-[10px] text-gray-600 hidden sm:block">{meta.hint}</p>
+            <span className="text-gray-500 text-xs">{open ? "▼" : "▶"}</span>
+          </div>
+        </button>
+        {open && (
+          <div className="p-2 space-y-2 border-t border-gray-800 bg-gray-950/40">
+            {list.map(renderUserCard)}
+          </div>
+        )}
+      </section>
+    );
+  };
+
   return (
     <div className="space-y-3">
       {/* Search bar */}
@@ -68,7 +197,40 @@ export default function UsersPage() {
             className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-purple-500" />
           <button onClick={fetchUsers} className="px-3 py-2 bg-purple-500/20 text-purple-400 rounded-lg text-sm font-bold hover:bg-purple-500/30">Refresh</button>
         </div>
-        <p className="text-[10px] text-gray-500 mt-2">{users.length} registered meat bags</p>
+        <div className="flex flex-wrap gap-1.5 mt-3">
+          {FILTER_PILLS.map((pill) => {
+            const count =
+              pill.id === "all"
+                ? meatBagCount
+                : segmentCounts[pill.id as MeatBagSegment].length;
+            const active = segmentFilter === pill.id;
+            return (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setSegmentFilter(pill.id)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-colors ${
+                  active
+                    ? "bg-purple-500/30 text-purple-200 border border-purple-500/50"
+                    : "bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-600"
+                }`}
+              >
+                {pill.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-gray-500 mt-2">
+          {meatBagCount} meat bags
+          {architectAccount ? " + The Architect" : ""}
+          {" · "}
+          {segmentCounts.anonymous.length} anonymous
+          {" · "}
+          {segmentCounts.wallet.length} wallet
+          {" · "}
+          {segmentCounts.connected.length} signed in
+          {userSearch ? ` · ${filteredRest.length} matching search` : ""}
+        </p>
       </div>
 
       {/* User detail modal */}
@@ -173,39 +335,33 @@ export default function UsersPage() {
       {/* User list */}
       {users.length === 0 ? (
         <div className="text-center py-12 text-gray-500"><div className="text-4xl mb-2">👻</div><p>No meat bags have signed up yet</p></div>
+      ) : filteredRest.length === 0 && !architect ? (
+        <div className="text-center py-12 text-gray-500"><div className="text-4xl mb-2">🔍</div><p>No matches for &ldquo;{userSearch}&rdquo;</p></div>
       ) : (
-        users.filter(u => {
-          if (!userSearch) return true;
-          const q = userSearch.toLowerCase();
-          return (u.username || "").toLowerCase().includes(q) || (u.display_name || "").toLowerCase().includes(q) || (u.phantom_wallet_address || "").toLowerCase().includes(q) || (u.session_id || "").toLowerCase().includes(q);
-        }).map((u) => (
-          <div key={u.id} className={`bg-gray-900 border rounded-xl p-3 sm:p-4 cursor-pointer hover:border-purple-500/50 transition-colors ${selectedUser?.id === u.id ? "border-purple-500/50" : "border-gray-800"}`}
-            onClick={() => fetchUserDetail(u.id)}>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-xl shrink-0">{u.avatar_emoji}</span>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-xs sm:text-sm text-gray-300 truncate">{u.display_name}</p>
-                    {!u.is_active && <span className="px-1 py-0.5 bg-red-500/20 text-red-400 rounded text-[10px] font-bold">OFF</span>}
-                  </div>
-                  <p className="text-[10px] sm:text-xs text-gray-500">@{u.username}</p>
-                </div>
+        <div className="space-y-4">
+          {architect && segmentFilter === "all" && (
+            <section className="border-2 border-amber-500/40 rounded-xl overflow-hidden bg-amber-500/5">
+              <div className="px-3 py-2 sm:px-4 border-b border-amber-500/20">
+                <h3 className="text-xs font-bold text-amber-300">
+                  🕉️ The Architect
+                  <span className="ml-2 text-amber-500/70 font-normal">(you)</span>
+                </h3>
+                <p className="text-[10px] text-amber-500/50 mt-0.5">
+                  Your human account — separate from the meat bag crowd
+                </p>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="text-right">
-                  <div className="flex gap-2 text-xs">
-                    <span title="Likes">❤️ {u.likes}</span><span title="Comments">💬 {u.comments}</span>
-                    <span title="NFTs">🎴 {u.nfts}</span><span title="Coins">🪙 {u.coin_balance.toLocaleString()}</span>
-                  </div>
-                  <p className="text-[10px] text-gray-500">{new Date(u.last_seen).toLocaleDateString()}</p>
-                </div>
-                {u.phantom_wallet_address && <span title="Phantom linked" className="text-purple-400 text-sm">👛</span>}
-                {u.auth_provider === "google" && <span title="Google auth" className="text-sm">🔵</span>}
-              </div>
+              <div className="p-2">{renderUserCard(architect)}</div>
+            </section>
+          )}
+
+          {segmentFilter === "all" ? (
+            <div className="space-y-3">{SEGMENT_ORDER.map(renderSegmentBlock)}</div>
+          ) : (
+            <div className="space-y-2">
+              {segmentedUsers[segmentFilter].map(renderUserCard)}
             </div>
-          </div>
-        ))
+          )}
+        </div>
       )}
     </div>
   );
