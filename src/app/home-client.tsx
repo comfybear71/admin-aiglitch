@@ -236,6 +236,9 @@ export default function HomeClient() {
   const [aiSpend, setAiSpend] = useState({ total: 0, xai: 0, anthropic: 0 });
   const [jobPaused, setJobPaused] = useState<Record<string, boolean>>({});
 
+  const [voiceDisabled, setVoiceDisabled] = useState<boolean | null>(null);
+  const [voiceSave, setVoiceSave] = useState<SaveState>({ kind: "idle" });
+
   const [throttle, setThrottle] = useState<number>(100);
   const [throttleSave, setThrottleSave] = useState<SaveState>({ kind: "idle" });
   const throttleTimer = useRef<NodeJS.Timeout | null>(null);
@@ -305,6 +308,18 @@ export default function HomeClient() {
     }
   }, []);
 
+  const fetchSettings = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/settings");
+      if (res.ok) {
+        const d = await res.json();
+        setVoiceDisabled(d.voice_disabled ?? false);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   // Initial load — all parallel
   useEffect(() => {
     void Promise.all([
@@ -313,8 +328,9 @@ export default function HomeClient() {
       fetchHealth(),
       fetchCosts(),
       fetchJobStates(),
+      fetchSettings(),
     ]);
-  }, [fetchStats, fetchActivity, fetchHealth, fetchCosts, fetchJobStates]);
+  }, [fetchStats, fetchActivity, fetchHealth, fetchCosts, fetchJobStates, fetchSettings]);
 
   // Auto-refresh: activity 15s, stats 30s, health + costs 60s
   useEffect(() => {
@@ -415,6 +431,28 @@ export default function HomeClient() {
     }
   };
 
+  const onVoiceToggle = async () => {
+    if (voiceDisabled === null) return;
+    const newValue = !voiceDisabled;
+    setVoiceDisabled(newValue);
+    setVoiceSave({ kind: "saving" });
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "voice_disabled", value: String(newValue) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setVoiceSave({ kind: "saved", at: new Date() });
+    } catch (err) {
+      setVoiceDisabled(!newValue);
+      setVoiceSave({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   // ─── Derived ──
 
   const today24hPosts = useMemo(
@@ -479,6 +517,9 @@ export default function HomeClient() {
             expandedCron={expandedCron}
             onExpand={(name) => setExpandedCron((cur) => (cur === name ? null : name))}
             onTogglePause={toggleJobPause}
+            voiceDisabled={voiceDisabled}
+            voiceSave={voiceSave}
+            onVoiceToggle={onVoiceToggle}
           />
         </div>
         <InterleavedFeed rows={interleaved} height={feedHeight} />
@@ -601,6 +642,9 @@ function ActivityAndJobsPanel({
   expandedCron,
   onExpand,
   onTogglePause,
+  voiceDisabled,
+  voiceSave,
+  onVoiceToggle,
 }: {
   throttle: number;
   throttleSave: SaveState;
@@ -612,6 +656,9 @@ function ActivityAndJobsPanel({
   expandedCron: string | null;
   onExpand: (name: string) => void;
   onTogglePause: (name: string) => void;
+  voiceDisabled: boolean | null;
+  voiceSave: SaveState;
+  onVoiceToggle: () => void;
 }) {
   const skippedPct = 100 - throttle;
   const sliderColor =
@@ -683,6 +730,38 @@ function ActivityAndJobsPanel({
         onExpand={onExpand}
         onTogglePause={onTogglePause}
       />
+
+      <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-800">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-xl">🔊</span>
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-white">AI Voice Chat</div>
+            <div className="text-[11px] text-gray-400 truncate">
+              {voiceDisabled
+                ? "OFF — users can't hear AI personas speak"
+                : "ON — xAI / browser TTS active"}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <SaveIndicator state={voiceSave} />
+          {voiceDisabled !== null && (
+            <button
+              onClick={onVoiceToggle}
+              className={`relative w-12 h-6 rounded-full transition-colors ${
+                voiceDisabled ? "bg-gray-700" : "bg-green-500"
+              }`}
+              aria-label="Toggle AI voice"
+            >
+              <div
+                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                  voiceDisabled ? "left-0.5" : "left-[calc(100%-1.375rem)]"
+                }`}
+              />
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
