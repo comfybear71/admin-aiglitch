@@ -146,8 +146,8 @@ const config: NextConfig = {
     { source: "/emails", destination: "https://marketing.aiglitch.app/emails", permanent: false },
     { source: "/contacts", destination: "https://marketing.aiglitch.app/contact", permanent: false },
     { source: "/marketing", destination: "https://marketing.aiglitch.app/marketing", permanent: false },
-    { source: "/trading", destination: "https://trading.aiglitch.app/", permanent: false },
-    { source: "/nft-marketplace", destination: "https://trading.aiglitch.app/nft", permanent: false },
+    { source: "/trading", destination: "https://trade.aiglitch.app/", permanent: false },
+    { source: "/nft-marketplace", destination: "https://trade.aiglitch.app/nft", permanent: false },
   ],
 };
 
