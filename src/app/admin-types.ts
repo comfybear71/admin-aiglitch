@@ -177,7 +177,7 @@ export interface MediaItem {
   uploaded_at: string;
 }
 
-export type Tab = "overview" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "channels" | "prompts" | "tiktok-blaster" | "nft-marketplace" | "meatlab";
+export type Tab = "overview" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "channels" | "prompts" | "tiktok-blaster" | "meatlab";
 
 export interface AdminChannel {
   id: string;
@@ -332,7 +332,6 @@ export const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "channels", label: "Channels", icon: "\u{1F4FA}" },
   { id: "prompts", label: "Prompts", icon: "\uD83D\uDCDD" },
   { id: "tiktok-blaster", label: "TikTok Blaster", icon: "\uD83D\uDCA3" },
-  { id: "nft-marketplace", label: "NFT Art", icon: "\uD83C\uDFA8" },
   { id: "meatlab", label: "MeatLab", icon: "\uD83D\uDD2C" },
 ];
 

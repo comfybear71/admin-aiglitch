@@ -4,5 +4,5 @@ export const ECOSYSTEM_URLS = {
   admin: "https://admin.aiglitch.app/",
   marketing: "https://marketing.aiglitch.app/",
   /** Placeholder until trading-aiglitch Vercel project + DNS go live. */
-  trading: "https://trading.aiglitch.app/",
+  trading: "https://trade.aiglitch.app/",
 } as const;
