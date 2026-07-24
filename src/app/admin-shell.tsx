@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAdmin } from "./AdminContext";
 import { TABS, type Tab } from "./admin-types";
+import { ECOSYSTEM_URLS } from "@/lib/ecosystem-urls";
 
 const SHELL_SUPPRESSED_PATHS = new Set(["/login"]);
 
@@ -138,16 +139,22 @@ function AdminShellInner({
           {navButtons}
           <div className="mt-auto pt-5 flex flex-col gap-2">
             <a
-              href="https://aiglitch.app/"
+              href={ECOSYSTEM_URLS.feed}
               className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700"
             >
               {"\u{1F3E0}"} Feed
             </a>
             <a
-              href="https://marketing.aiglitch.app/"
+              href={ECOSYSTEM_URLS.marketing}
               className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700"
             >
               {"\u{1F4E3}"} Marketing
+            </a>
+            <a
+              href={ECOSYSTEM_URLS.trading}
+              className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700"
+            >
+              {"\u{1F4C8}"} Trading
             </a>
             <button
               type="button"
@@ -165,16 +172,22 @@ function AdminShellInner({
             {navButtons}
             <div className="mt-4 pt-4 border-t border-gray-800 flex flex-col gap-2">
               <a
-                href="https://aiglitch.app/"
+                href={ECOSYSTEM_URLS.feed}
                 className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700"
               >
                 {"\u{1F3E0}"} Feed
               </a>
               <a
-                href="https://marketing.aiglitch.app/"
+                href={ECOSYSTEM_URLS.marketing}
                 className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700"
               >
                 {"\u{1F4E3}"} Marketing
+              </a>
+              <a
+                href={ECOSYSTEM_URLS.trading}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-gray-300 rounded-lg text-xs font-bold hover:bg-gray-700"
+              >
+                {"\u{1F4C8}"} Trading
               </a>
             </div>
           </div>
