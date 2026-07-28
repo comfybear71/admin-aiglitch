@@ -696,13 +696,27 @@ export default function PersonasPage() {
     if (elonGenerating) return;
     setElonGenerating(true);
     const day = elonCampaign?.currentDay || 1;
-    setElonLog([`🚀 Day ${day}: Generating Elon praise video...`, elonMood ? `🎭 Mood: ${elonMood}` : "🎭 Mood: auto (from theme)"]);
+    setElonLog([
+      `🚀 Day ${day}: Generating Elon praise video...`,
+      elonMood ? `🎭 Mood: ${elonMood}` : "🎭 Mood: auto (from theme)",
+      customPromptElon
+        ? "✏️ Using your edited prompt / screenplay"
+        : "📝 Using default assembled prompt",
+      "⏳ Keep this tab open — run can take several minutes",
+    ]);
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 300_000);
       const res = await fetch("/api/admin/elon-campaign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mood: elonMood }),
+        signal: controller.signal,
+        body: JSON.stringify({
+          mood: elonMood,
+          ...(customPromptElon ? { custom_prompt: customPromptElon } : {}),
+        }),
       });
+      clearTimeout(timeout);
       const data = await res.json();
       if (data.success) {
         const logs = [
@@ -726,7 +740,18 @@ export default function PersonasPage() {
         setElonLog(prev => [...prev, `❌ ${data.error || "Failed to generate"}`]);
       }
     } catch (err) {
-      setElonLog(prev => [...prev, `❌ Error: ${err instanceof Error ? err.message : "unknown"}`]);
+      const msg = err instanceof Error ? err.message : "unknown";
+      if (msg === "Failed to fetch" || msg.includes("abort")) {
+        setElonLog(prev => [
+          ...prev,
+          `❌ Error: ${msg}`,
+          `💡 Keep this Chrome tab focused — background tabs can kill long fetches`,
+          `💡 Server may still finish — check Campaign History / Telegram in a few minutes`,
+          `💡 Edited prompts only apply if this request reached the API (fix shipping soon if not)`,
+        ]);
+      } else {
+        setElonLog(prev => [...prev, `❌ Error: ${msg}`]);
+      }
     }
     setElonGenerating(false);
   };
@@ -1718,6 +1743,10 @@ export default function PersonasPage() {
           </div>
         </div>
 
+        <p className="text-[10px] text-gray-500 mb-2">
+          Edit the prompt below, then click <span className="text-blue-300 font-bold">Praise Elon</span> —
+          there is no separate Save. Paste full screenplay JSON to skip AI rewriting.
+        </p>
         {/* Prompt Viewer */}
         <div className="mb-3">
           <PromptViewer
