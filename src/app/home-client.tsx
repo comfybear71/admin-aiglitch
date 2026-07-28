@@ -170,6 +170,7 @@ interface ActivityData {
       errorMessage: string | null;
       sourcePostId: string | null;
       contentPreview: string;
+      mediaSource?: string | null;
       displayName: string | null;
       username: string | null;
       avatarEmoji: string | null;
@@ -1237,7 +1238,7 @@ function PlatformDashboard({
             )}
           </div>
           <p className="text-[9px] text-gray-600 mt-1">
-            Feed crons do not auto-post; marketing-post cron spreads top posts every 4h.
+            Persona content auto-spreads when under the daily cap; marketing-post cron also spreads top posts every 4h.
           </p>
         </div>
       </div>
@@ -1592,8 +1593,8 @@ function InterleavedFeed({
           <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-1.5">
             Latest social spreads
           </div>
-          <div className="space-y-1 max-h-28 overflow-y-auto">
-            {socialRecent.slice(0, 6).map((s) => (
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {socialRecent.slice(0, 12).map((s) => (
               <div
                 key={s.id}
                 className="flex items-center gap-2 text-[10px] text-gray-400"
@@ -1610,6 +1611,11 @@ function InterleavedFeed({
                 >
                   {s.status}
                 </span>
+                {s.mediaSource ? (
+                  <span className="text-purple-400/80 shrink-0 truncate max-w-[72px]" title={s.mediaSource}>
+                    {s.mediaSource.replace(/-cron$/, "")}
+                  </span>
+                ) : null}
                 <span className="truncate flex-1">
                   {s.displayName ? `${s.avatarEmoji ?? ""} ${s.displayName}` : s.contentPreview}
                 </span>

@@ -214,6 +214,7 @@ export function FacebookPanel() {
           <option value="news">Breaking news</option>
           <option value="marketplace">Marketplace</option>
           <option value="ads">Ads (cron promos)</option>
+          <option value="persona">Persona content</option>
           <option value="hero">Hero posters</option>
           <option value="platform-poster">Platform posters</option>
           <option value="glitch-promo">GLITCH promotions</option>

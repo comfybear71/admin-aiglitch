@@ -505,7 +505,9 @@ export default function MediaPage() {
                 {videoStats.by_source.map(({ source, count }) => {
                   const pct = videoStats.total > 0 ? (count / videoStats.total) * 100 : 0;
                   const sourceLabels: Record<string, { label: string; color: string }> = {
-                    "persona-content-cron": { label: "Persona Content Cron", color: "bg-cyan-500" },
+                    "persona-content": { label: "Persona Content", color: "bg-cyan-500" },
+                    "persona-content-cron": { label: "Persona Content (legacy)", color: "bg-cyan-500" },
+                    generate: { label: "General Generate", color: "bg-indigo-500" },
                     "grok-video": { label: "Grok Video", color: "bg-blue-500" },
                     "grok-img2vid": { label: "Grok Image→Video", color: "bg-indigo-500" },
                     "director-movie": { label: "Director Movies", color: "bg-purple-500" },
