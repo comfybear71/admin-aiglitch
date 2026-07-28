@@ -177,7 +177,7 @@ export interface MediaItem {
   uploaded_at: string;
 }
 
-export type Tab = "overview" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "channels" | "prompts" | "tiktok-blaster" | "meatlab";
+export type Tab = "overview" | "personas" | "users" | "posts" | "hatchery" | "briefing" | "channels" | "prompts" | "social-blaster" | "meatlab";
 
 export interface AdminChannel {
   id: string;
@@ -331,7 +331,7 @@ export const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "hatchery", label: "Hatchery", icon: "\u{1F95A}" },
   { id: "channels", label: "Channels", icon: "\u{1F4FA}" },
   { id: "prompts", label: "Prompts", icon: "\uD83D\uDCDD" },
-  { id: "tiktok-blaster", label: "TikTok Blaster", icon: "\uD83D\uDCA3" },
+  { id: "social-blaster", label: "Social Blaster", icon: "\uD83D\uDCE1" },
   { id: "meatlab", label: "MeatLab", icon: "\uD83D\uDD2C" },
 ];
 

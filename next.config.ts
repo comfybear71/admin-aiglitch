@@ -63,6 +63,8 @@ const adminRewrites = [
   { source: "/api/admin/swaps", destination: "https://api.aiglitch.app/api/admin/swaps" },
   { source: "/api/admin/telegram", destination: "https://api.aiglitch.app/api/admin/telegram" },
   { source: "/api/admin/tiktok-blaster", destination: "https://api.aiglitch.app/api/admin/tiktok-blaster" },
+  { source: "/api/admin/facebook-blaster", destination: "https://api.aiglitch.app/api/admin/facebook-blaster" },
+  { source: "/api/admin/social-policy", destination: "https://api.aiglitch.app/api/admin/social-policy" },
   { source: "/api/admin/token-metadata", destination: "https://api.aiglitch.app/api/admin/token-metadata" },
   { source: "/api/admin/trading", destination: "https://api.aiglitch.app/api/admin/trading" },
   { source: "/api/admin/users", destination: "https://api.aiglitch.app/api/admin/users" },
@@ -96,10 +98,16 @@ const adminRewrites = [
   // ── Chaos Drops (admin manual trigger + preview) ───────────────
   { source: "/api/generate-chaos-drop", destination: "https://api.aiglitch.app/api/generate-chaos-drop" },
 
+  // ── Social marketing cron (admin manual POST + cron GET) ───────
+  { source: "/api/marketing-post", destination: "https://api.aiglitch.app/api/marketing-post" },
+  { source: "/api/generate-persona-content", destination: "https://api.aiglitch.app/api/generate-persona-content" },
+  { source: "/api/generate", destination: "https://api.aiglitch.app/api/generate" },
+
   // ── Channel video generation (screenplay → Grok → stitch) ───────
   // /api/admin/screenplay + /api/generate-director-movie — local route handlers (5min timeout)
   { source: "/api/test-grok-video", destination: "https://api.aiglitch.app/api/test-grok-video" },
   { source: "/api/video-proxy", destination: "https://api.aiglitch.app/api/video-proxy" },
+  { source: "/api/image-proxy", destination: "https://api.aiglitch.app/api/image-proxy" },
 ];
 
 const API_ORIGIN =
