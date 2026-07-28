@@ -20,6 +20,16 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-07-28 — Social Phase 2+ (Overview + Blaster)
+
+**Branch:** `claude/social-phase-2` — merge **after** aiglitch-api same branch.
+
+- Overview: persona auto-spread copy; social event log shows `mediaSource` (12 rows)
+- Facebook Blaster: **Persona content** source filter
+- Media page labels for `persona-content` / `generate`
+
+---
+
 ### 2026-07-28 — Telegram Bestie cadence (with API)
 
 **Branch:** `claude/telegram-bestie-fix` — merge **after** aiglitch-api same branch.
