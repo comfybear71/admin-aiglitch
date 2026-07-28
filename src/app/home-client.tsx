@@ -142,6 +142,46 @@ interface ActivityData {
   lastCronRuns?: { cronName: string; lastStartedAt: string; lastStatus: string }[];
   cronCosts?: CronCost[];
   cronSchedules: CronSchedule[];
+  socialSpread?: {
+    posted24h: number;
+    failed24h: number;
+    queued24h: number;
+    feedBacklog24h: number;
+    recent: Array<{
+      id: string;
+      platform: string;
+      status: string;
+      createdAt: string;
+      errorMessage: string | null;
+      sourcePostId: string | null;
+      contentPreview: string;
+      displayName: string | null;
+      username: string | null;
+      avatarEmoji: string | null;
+    }>;
+  };
+  manualActions?: Array<{
+    id: string;
+    label: string;
+    description: string;
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+  }>;
+  socialPolicy?: {
+    postsPerDay: number;
+    platforms: string[];
+    facebookAuto: boolean;
+    postsPerMarketingCycle: number;
+    activePlatforms: string[];
+  };
+  forecast?: {
+    feedPostsLast24h: number;
+    expectedFeedPostsAt100PctThrottle: number;
+    expectedMarketingCronRuns24h: number;
+    maxAutoOriginalPostsPerDay: number;
+    maxAutoPlatformPostsPerDay: number;
+  };
 }
 
 interface StatsOverview {
@@ -210,16 +250,25 @@ const SERVICE_META: Record<string, { emoji: string; label: string; description: 
 const OVERVIEW_SERVICES = ["database", "redis", "anthropic", "xai"] as const;
 
 const PATH_TO_CRON_NAME: Record<string, string> = {
-  "/api/generate-persona-content": "persona-content",
+  "/api/generate-persona-content": "generate-persona-content",
   "/api/generate": "general-content",
   "/api/generate-director-movie": "director-movie",
   "/api/ai-trading": "ai-trading",
   "/api/budju-trading": "budju-trading",
   "/api/generate-avatars": "avatar-gen",
-  "/api/generate-topics": "topics-news",
-  "/api/generate-ads": "ads",
-  "/api/generate-chaos-drop": "chaos-drops",
+  "/api/generate-topics": "generate-topics",
+  "/api/generate-ads": "generate-ads",
+  "/api/generate-chaos-drop": "generate-chaos-drop",
+  "/api/marketing-post": "marketing-post",
+  "/api/x-react": "x-react",
+  "/api/telegram/persona-message": "telegram-persona-message",
 };
+
+/** Map cron schedule path (may include ?query) to cron_runs.cron_name. */
+function cronPathToName(path: string): string {
+  const base = path.split("?")[0];
+  return PATH_TO_CRON_NAME[path] || PATH_TO_CRON_NAME[base] || "";
+}
 
 type SaveState =
   | { kind: "idle" }
@@ -372,7 +421,7 @@ export default function HomeClient() {
       const next: Record<string, number> = {};
       for (const cron of activity.cronSchedules) {
         const intervalMs = cron.interval * 60 * 1000;
-        const cronName = PATH_TO_CRON_NAME[cron.path];
+        const cronName = cronPathToName(cron.path);
         const lastRun = cronName
           ? activity.lastCronRuns?.find((r) => r.cronName === cronName)
           : undefined;
@@ -520,9 +569,14 @@ export default function HomeClient() {
             voiceDisabled={voiceDisabled}
             voiceSave={voiceSave}
             onVoiceToggle={onVoiceToggle}
+            onRefreshActivity={fetchActivity}
           />
         </div>
-        <InterleavedFeed rows={interleaved} height={feedHeight} />
+        <InterleavedFeed
+          rows={interleaved}
+          height={feedHeight}
+          socialRecent={activity?.socialSpread?.recent}
+        />
       </div>
 
       {/* 5. Content mix + top personas */}
@@ -629,6 +683,221 @@ function SpendBar({
   );
 }
 
+// ─── Auto-social policy (Overview controls) ───────────────────────────
+
+function SocialAutoPolicyPanel({
+  activity,
+  onSaved,
+}: {
+  activity: ActivityData | null;
+  onSaved: () => void;
+}) {
+  const sp = activity?.socialPolicy;
+  const fc = activity?.forecast;
+  const [postsPerDay, setPostsPerDay] = useState(3);
+  const [facebookAuto, setFacebookAuto] = useState(true);
+  const [platforms, setPlatforms] = useState<Record<string, boolean>>({
+    x: true,
+    telegram: true,
+    instagram: true,
+    facebook: true,
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!sp) return;
+    setPostsPerDay(sp.postsPerDay);
+    setFacebookAuto(sp.facebookAuto);
+    setPlatforms({
+      x: sp.platforms.includes("x"),
+      telegram: sp.platforms.includes("telegram"),
+      instagram: sp.platforms.includes("instagram"),
+      facebook: sp.platforms.includes("facebook"),
+    });
+  }, [sp?.postsPerDay, sp?.facebookAuto, sp?.platforms.join(",")]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const list = (["x", "telegram", "instagram", "facebook"] as const).filter(
+        (p) => platforms[p],
+      );
+      await fetch("/api/admin/social-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          postsPerDay,
+          facebookAuto,
+          platforms: list,
+        }),
+      });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!sp) return null;
+
+  return (
+    <div className="border border-gray-800 rounded-lg p-3 bg-gray-950/50 space-y-3">
+      <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+        Auto-social (marketing cron)
+      </div>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <label className="text-gray-400">
+          Feed posts to promote / day:{" "}
+          <input
+            type="number"
+            min={0}
+            max={24}
+            value={postsPerDay}
+            onChange={(e) => setPostsPerDay(Number(e.target.value))}
+            className="w-14 ml-1 px-1 py-0.5 bg-gray-900 border border-gray-700 rounded text-white font-mono"
+          />
+        </label>
+        <label className="flex items-center gap-1.5 text-gray-300">
+          <input
+            type="checkbox"
+            checked={facebookAuto}
+            onChange={(e) => setFacebookAuto(e.target.checked)}
+          />
+          Facebook API auto-post
+        </label>
+      </div>
+      <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+        {(["x", "telegram", "instagram", "facebook"] as const).map((p) => (
+          <label key={p} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={platforms[p]}
+              onChange={(e) =>
+                setPlatforms((prev) => ({ ...prev, [p]: e.target.checked }))
+              }
+            />
+            {p}
+          </label>
+        ))}
+      </div>
+      {fc && (
+        <p className="text-[10px] text-gray-500 leading-relaxed">
+          Last 24h: <strong className="text-cyan-400">{fc.feedPostsLast24h}</strong> feed
+          posts · at 100% throttle ≈{" "}
+          <strong>{fc.expectedFeedPostsAt100PctThrottle}</strong> · ~{" "}
+          <strong>{fc.expectedMarketingCronRuns24h}</strong> marketing runs left today at
+          current activity · auto cap up to{" "}
+          <strong>{fc.maxAutoPlatformPostsPerDay}</strong> platform-posts/day (
+          {sp.postsPerMarketingCycle} originals × {sp.activePlatforms.length} platforms)
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={saving}
+        onClick={save}
+        className="px-3 py-1 text-[11px] font-bold bg-purple-500/20 text-purple-300 rounded border border-purple-500/40 disabled:opacity-50"
+      >
+        {saving ? "Saving…" : "Save auto-social rules"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Manual job triggers (Overview quick actions) ─────────────────────
+
+const PLATFORM_EMOJI: Record<string, string> = {
+  x: "𝕏",
+  telegram: "✈️",
+  instagram: "📸",
+  facebook: "📘",
+  youtube: "▶️",
+  tiktok: "🎵",
+};
+
+function ManualQuickActions({
+  actions,
+  onDone,
+}: {
+  actions?: ActivityData["manualActions"];
+  onDone: () => void;
+}) {
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [lastMsg, setLastMsg] = useState<string | null>(null);
+
+  if (!actions?.length) return null;
+
+  const runAction = async (action: NonNullable<ActivityData["manualActions"]>[number]) => {
+    if (runningId) return;
+    const slow =
+      action.id === "elon-campaign" ||
+      action.id === "breaking-news";
+    if (
+      slow &&
+      !confirm(`${action.label} can take several minutes. Start now?`)
+    ) {
+      return;
+    }
+    setRunningId(action.id);
+    setLastMsg(null);
+    try {
+      const res = await fetch(action.path, {
+        method: action.method,
+        headers: { "Content-Type": "application/json" },
+        body: action.body ? JSON.stringify(action.body) : "{}",
+      });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLastMsg(data?.error ? String(data.error) : `HTTP ${res.status}`);
+        return;
+      }
+      if (action.id === "marketing-post") {
+        setLastMsg(
+          `Spread cycle: ${data.posted ?? 0} posted, ${data.failed ?? 0} failed, ${data.skipped ?? 0} skipped`,
+        );
+      } else if (data.message) {
+        setLastMsg(String(data.message));
+      } else if (data.success) {
+        setLastMsg(`${action.label} started OK`);
+      } else {
+        setLastMsg(`${action.label} finished`);
+      }
+      onDone();
+    } catch (err) {
+      setLastMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunningId(null);
+    }
+  };
+
+  return (
+    <div className="border border-gray-800 rounded-lg p-2.5 bg-gray-950/40 space-y-2">
+      <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+        Quick actions (bypass activity throttle)
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {actions.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            disabled={!!runningId}
+            title={a.description}
+            onClick={() => runAction(a)}
+            className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/30 hover:bg-purple-500/25 disabled:opacity-40"
+          >
+            {runningId === a.id ? "⏳…" : `▶ ${a.label}`}
+          </button>
+        ))}
+      </div>
+      {lastMsg && (
+        <p className="text-[10px] text-gray-400 leading-snug">{lastMsg}</p>
+      )}
+    </div>
+  );
+}
+
 // ─── 3. Activity level + cron jobs ────────────────────────────────────
 
 function ActivityAndJobsPanel({
@@ -645,6 +914,7 @@ function ActivityAndJobsPanel({
   voiceDisabled,
   voiceSave,
   onVoiceToggle,
+  onRefreshActivity,
 }: {
   throttle: number;
   throttleSave: SaveState;
@@ -659,6 +929,7 @@ function ActivityAndJobsPanel({
   voiceDisabled: boolean | null;
   voiceSave: SaveState;
   onVoiceToggle: () => void;
+  onRefreshActivity: () => void;
 }) {
   const skippedPct = 100 - throttle;
   const sliderColor =
@@ -715,10 +986,21 @@ function ActivityAndJobsPanel({
             <>
               At {throttle}%, ~{skippedPct}% of cron runs will be skipped across{" "}
               {activeJobsCount} jobs.
+              {activity?.forecast && (
+                <span className="block mt-1 text-gray-500">
+                  ~{activity.forecast.expectedMarketingCronRuns24h} marketing runs · up to{" "}
+                  {activity.forecast.maxAutoOriginalPostsPerDay} auto-social originals/day (if
+                  crons run)
+                </span>
+              )}
             </>
           )}
         </p>
       </div>
+
+      <ManualQuickActions actions={activity?.manualActions} onDone={onRefreshActivity} />
+
+      <SocialAutoPolicyPanel activity={activity} onSaved={onRefreshActivity} />
 
       <CronTimers
         embedded
@@ -835,7 +1117,7 @@ function PlatformDashboard({
         📊 Platform Overview
       </h3>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
         <div className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 rounded-xl p-3">
           <div className="flex items-center gap-2 mb-1.5">
             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -873,6 +1155,39 @@ function PlatformDashboard({
           <div className="text-[10px] text-gray-500 mt-1">
             avg {Math.round(today24hPosts / 24)}/hr
           </div>
+        </div>
+
+        <div className="bg-gray-950/60 border border-gray-800 rounded-xl p-3 sm:col-span-2 lg:col-span-1">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <div className="flex items-center gap-1.5">
+              <span>📡</span>
+              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                Social (24h)
+              </span>
+            </div>
+            <Link
+              href="/social-blaster"
+              className="text-[10px] text-purple-400 hover:text-purple-300 font-bold"
+            >
+              Social Blaster →
+            </Link>
+          </div>
+          <div className="text-2xl font-black font-mono text-green-400">
+            {(activity?.socialSpread?.posted24h ?? 0).toLocaleString()}
+            <span className="text-sm text-gray-500 font-normal ml-1">posted</span>
+          </div>
+          <div className="text-[10px] text-gray-500 mt-1.5 leading-relaxed">
+            {(activity?.socialSpread?.feedBacklog24h ?? 0).toLocaleString()} feed posts not spread yet
+            {(activity?.socialSpread?.failed24h ?? 0) > 0 && (
+              <span className="text-red-400">
+                {" "}
+                · {activity!.socialSpread!.failed24h} failed
+              </span>
+            )}
+          </div>
+          <p className="text-[9px] text-gray-600 mt-1">
+            Feed crons do not auto-post; marketing-post cron spreads top posts every 4h.
+          </p>
         </div>
       </div>
 
@@ -970,7 +1285,7 @@ function CronTimers({
           const remaining = countdowns[cron.path] ?? cron.interval * 60 * 1000;
           const intervalMs = cron.interval * 60 * 1000;
           const isRunning = remaining <= 0;
-          const cronName = PATH_TO_CRON_NAME[cron.path] || "";
+          const cronName = cronPathToName(cron.path);
           const lastRun = cronName
             ? activity.lastCronRuns?.find((r) => r.cronName === cronName)
             : undefined;
@@ -1171,18 +1486,52 @@ function CronTimers({
 function InterleavedFeed({
   rows,
   height,
+  socialRecent,
 }: {
   rows: Array<
     | { kind: "post"; time: number; post: ActivityPost }
     | { kind: "cron"; time: number; run: CronRun }
   >;
   height?: number;
+  socialRecent?: NonNullable<ActivityData["socialSpread"]>["recent"];
 }) {
   return (
     <div
       className="bg-gray-900 border border-gray-800 rounded-xl p-3 sm:p-4 flex flex-col overflow-hidden min-w-0"
       style={height ? { height } : undefined}
     >
+      {socialRecent && socialRecent.length > 0 && (
+        <div className="mb-3 pb-2 border-b border-gray-800 shrink-0">
+          <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-1.5">
+            Latest social spreads
+          </div>
+          <div className="space-y-1 max-h-28 overflow-y-auto">
+            {socialRecent.slice(0, 6).map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-2 text-[10px] text-gray-400"
+              >
+                <span>{PLATFORM_EMOJI[s.platform] ?? s.platform}</span>
+                <span
+                  className={
+                    s.status === "posted"
+                      ? "text-green-400 font-bold"
+                      : s.status === "failed"
+                      ? "text-red-400 font-bold"
+                      : "text-amber-400"
+                  }
+                >
+                  {s.status}
+                </span>
+                <span className="truncate flex-1">
+                  {s.displayName ? `${s.avatarEmoji ?? ""} ${s.displayName}` : s.contentPreview}
+                </span>
+                <span className="text-gray-600 shrink-0">{timeAgo(s.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <h3 className="text-xs sm:text-sm font-bold text-gray-300 mb-2 flex items-center gap-1.5 shrink-0">
         📡 Recent Activity
         <span className="text-[10px] text-gray-500 font-normal">
