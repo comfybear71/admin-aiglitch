@@ -67,6 +67,21 @@ interface CronSchedule {
   path: string;
   interval: number;
   unit: string;
+  defaultInterval?: number;
+  job?: string;
+}
+
+const CRON_INTERVAL_PRESETS = [30, 40, 60, 120, 180, 240, 360, 720, 1440] as const;
+
+function formatIntervalLabel(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes % 60 === 0) {
+    const h = minutes / 60;
+    return h === 1 ? "1 hour" : `${h} hours`;
+  }
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${m}m`;
 }
 
 interface ActivityPost {
@@ -480,6 +495,37 @@ export default function HomeClient() {
     }
   };
 
+  const setJobInterval = async (jobName: string, minutes: number) => {
+    if (!jobName || !Number.isFinite(minutes)) return;
+    try {
+      const res = await fetch("/api/activity-throttle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set_interval",
+          job_name: jobName,
+          minutes,
+        }),
+      });
+      if (!res.ok) return;
+      const d = (await res.json()) as { intervalMinutes?: number };
+      const saved = d.intervalMinutes ?? minutes;
+      setActivity((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          cronSchedules: prev.cronSchedules.map((c) => {
+            const name = cronPathToName(c.path);
+            if (name !== jobName && c.job !== jobName) return c;
+            return { ...c, interval: saved };
+          }),
+        };
+      });
+    } catch {
+      /* ignore */
+    }
+  };
+
   const onVoiceToggle = async () => {
     if (voiceDisabled === null) return;
     const newValue = !voiceDisabled;
@@ -566,6 +612,7 @@ export default function HomeClient() {
             expandedCron={expandedCron}
             onExpand={(name) => setExpandedCron((cur) => (cur === name ? null : name))}
             onTogglePause={toggleJobPause}
+            onSetInterval={setJobInterval}
             voiceDisabled={voiceDisabled}
             voiceSave={voiceSave}
             onVoiceToggle={onVoiceToggle}
@@ -911,6 +958,7 @@ function ActivityAndJobsPanel({
   expandedCron,
   onExpand,
   onTogglePause,
+  onSetInterval,
   voiceDisabled,
   voiceSave,
   onVoiceToggle,
@@ -926,6 +974,7 @@ function ActivityAndJobsPanel({
   expandedCron: string | null;
   onExpand: (name: string) => void;
   onTogglePause: (name: string) => void;
+  onSetInterval: (name: string, minutes: number) => void;
   voiceDisabled: boolean | null;
   voiceSave: SaveState;
   onVoiceToggle: () => void;
@@ -1011,6 +1060,7 @@ function ActivityAndJobsPanel({
         expandedCron={expandedCron}
         onExpand={onExpand}
         onTogglePause={onTogglePause}
+        onSetInterval={onSetInterval}
       />
 
       <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-800">
@@ -1267,6 +1317,7 @@ function CronTimers({
   expandedCron,
   onExpand,
   onTogglePause,
+  onSetInterval,
 }: {
   embedded?: boolean;
   activity: ActivityData | null;
@@ -1276,6 +1327,7 @@ function CronTimers({
   expandedCron: string | null;
   onExpand: (name: string) => void;
   onTogglePause: (name: string) => void;
+  onSetInterval: (name: string, minutes: number) => void;
 }) {
   if (!activity || activity.cronSchedules.length === 0) return null;
 
@@ -1375,21 +1427,55 @@ function CronTimers({
               </div>
 
               {isExpanded && (
-                <div className="mt-2 ml-4 pl-3 border-l-2 border-purple-500/30 space-y-1">
-                  <div className="text-[10px] text-gray-500 mb-1">
-                    Every {cron.interval}
-                    {cron.unit[0]}
+                <div className="mt-2 ml-4 pl-3 border-l-2 border-purple-500/30 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">
+                      Run at most every
+                    </label>
+                    <select
+                      value={cron.interval}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        if (cronName) onSetInterval(cronName, Number(e.target.value));
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="px-2 py-1 text-[11px] bg-gray-950 border border-gray-700 rounded-lg text-cyan-300 font-mono"
+                    >
+                      {Array.from(
+                        new Set([
+                          ...CRON_INTERVAL_PRESETS,
+                          cron.interval,
+                          cron.defaultInterval ?? cron.interval,
+                        ]),
+                      )
+                        .sort((a, b) => a - b)
+                        .map((m) => (
+                          <option key={m} value={m}>
+                            {formatIntervalLabel(m)}
+                            {cron.defaultInterval === m ? " (default)" : ""}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="text-[10px] text-gray-500">
+                    Soft limit — Vercel may still ping earlier; early hits are skipped (no AI spend).
+                    {cron.defaultInterval != null &&
+                      cron.interval !== cron.defaultInterval && (
+                        <span className="text-cyan-500/80">
+                          {" "}
+                          · default {formatIntervalLabel(cron.defaultInterval)}
+                        </span>
+                      )}
                     {throttle < 100 && (
                       <span className="text-yellow-500/70">
                         {" "}
-                        · effective ~{Math.round(cron.interval / (throttle / 100))}
-                        {cron.unit[0]} at {throttle}%
+                        · throttle {throttle}% also applies
                       </span>
                     )}
                     {jobCost && jobCost.throttled7d > 0 && (
                       <span className="text-yellow-500">
                         {" "}
-                        · {jobCost.throttled7d} throttled (7d)
+                        · {jobCost.throttled7d} skipped (7d)
                       </span>
                     )}
                   </div>
