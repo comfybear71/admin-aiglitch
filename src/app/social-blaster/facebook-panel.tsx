@@ -107,6 +107,7 @@ export function FacebookPanel() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyErrorId, setCopyErrorId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [nftCatalogCount, setNftCatalogCount] = useState<number | null>(null);
 
   const fetchPosts = useCallback(async () => {
     setLoading(true);
@@ -116,12 +117,20 @@ export function FacebookPanel() {
       const res = await fetch(
         `/api/admin/facebook-blaster?days=${days}&bucket=${bucket}&show=${show}&limit=200`,
       );
-      const data = await res.json();
+      const data = (await res.json()) as {
+        posts?: FbPost[];
+        error?: string;
+        nft_catalog_count?: number;
+      };
       if (data.error) {
         setError(data.error);
         setPosts([]);
+        setNftCatalogCount(null);
       } else {
         setPosts(data.posts || []);
+        setNftCatalogCount(
+          typeof data.nft_catalog_count === "number" ? data.nft_catalog_count : null,
+        );
       }
     } catch (err) {
       setError(String(err));
@@ -245,7 +254,19 @@ export function FacebookPanel() {
         <span className="text-gray-400">
           Blasted: <strong className="text-green-400">{blasted.length}</strong>
         </span>
+        {bucket === "marketplace" && nftCatalogCount != null && (
+          <span className="text-gray-400">
+            NFT catalog: <strong className="text-purple-300">{nftCatalogCount}</strong>
+          </span>
+        )}
       </div>
+
+      {bucket !== "marketplace" && (
+        <p className="text-[11px] text-amber-500/90">
+          Grokified marketplace NFTs (55 products) appear when source is{" "}
+          <strong className="text-amber-300">Marketplace</strong>, not All sources.
+        </p>
+      )}
 
       {error && (
         <div className="text-red-400 text-sm border border-red-500/40 rounded-lg p-3">{error}</div>
