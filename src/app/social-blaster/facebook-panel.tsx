@@ -14,6 +14,8 @@ interface FbPost {
   persona_name: string;
   persona_emoji: string;
   persona_username: string;
+  product_id?: string | null;
+  kind?: "feed_post" | "nft_product";
   created_at: string;
   has_media: boolean;
   is_video: boolean;
@@ -48,10 +50,15 @@ function sanitizeBasename(raw: string, max = 60): string {
 
 function mediaFilename(post: FbPost): string {
   const title = sanitizeBasename((post.content.split("\n")[0] || post.content).slice(0, 120));
-  const ch = sanitizeBasename(post.channel_name, 24);
+  const ch = sanitizeBasename(
+    post.kind === "nft_product" ? "marketplace-nft" : post.channel_name,
+    24,
+  );
   const who = sanitizeBasename(post.persona_username || post.persona_name, 24);
+  const sku = post.product_id ? sanitizeBasename(post.product_id, 16) : "";
   const ext = post.is_video ? "mp4" : "jpg";
-  return `aiglitch-${ch}-${who}-${title}.${ext}`;
+  const mid = sku ? `${who}-${sku}` : who;
+  return `aiglitch-${ch}-${mid}-${title}.${ext}`;
 }
 
 function downloadHref(post: FbPost): string | null {
@@ -287,8 +294,10 @@ export function FacebookPanel() {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold truncate">{post.persona_name}</p>
                     <p className="text-[10px] text-gray-500">
-                      {post.channel_emoji} {post.channel_name} · {post.post_type} ·{" "}
-                      {timeAgo(post.created_at)}
+                      {post.channel_emoji}{" "}
+                      {post.kind === "nft_product" ? "Marketplace NFT" : post.channel_name} ·{" "}
+                      {post.product_id ? `${post.product_id} · ` : ""}
+                      {post.post_type} · {timeAgo(post.created_at)}
                     </p>
                   </div>
                 </div>
