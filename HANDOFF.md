@@ -20,6 +20,15 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-07-28 — Telegram Bestie cadence (with API)
+
+**Branch:** `claude/telegram-bestie-fix` — merge **after** aiglitch-api same branch.
+
+- Map `/api/bestie-life` → `bestie-life` for Overview pause/interval
+- Platform brief cron lines: 2× daily texts, 1× daily life photo
+
+---
+
 ### 2026-07-22 — Admin tab strip complete; Trade button on roadmap; next = marketing
 
 **Status:** User signed off admin page work ("that is it for admin page"). **Next focus:** `marketing-aiglitch` (not admin-aiglitch).
