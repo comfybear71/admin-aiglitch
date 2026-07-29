@@ -20,6 +20,16 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-07-29 — Prompt library UI (Elon + Ad)
+
+**Branch:** `claude/prompt-library` — merge **after** aiglitch-api same branch.
+
+- PromptViewer: Library bar (Save draft / Load / Del) via `libraryCollection`
+- Wired on Personas → Elon + Ad Campaign
+- Rewrite: `/api/admin/prompt-library`
+
+---
+
 ### 2026-07-28 — Social Phase 2+ (Overview + Blaster)
 
 **Branch:** `claude/social-phase-2` — merge **after** aiglitch-api same branch.

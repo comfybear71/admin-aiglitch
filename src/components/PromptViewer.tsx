@@ -18,6 +18,19 @@ interface PromptViewerProps {
   defaultOpen?: boolean;
   /** When this value changes, refetch the prompt (e.g. style|mode|concept) */
   reloadKey?: string;
+  /**
+   * When set, shows Save / Load draft library for this collection
+   * (elon | ad | promo | poster | hero | …).
+   */
+  libraryCollection?: string;
+}
+
+interface LibraryListItem {
+  id: string;
+  title: string;
+  preview: string;
+  created_at: string;
+  stale: boolean;
 }
 
 const ACCENT_STYLES: Record<string, { border: string; text: string; bg: string }> = {
@@ -57,6 +70,7 @@ export default function PromptViewer({
   disabled = false,
   defaultOpen = false,
   reloadKey,
+  libraryCollection,
 }: PromptViewerProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [loading, setLoading] = useState(false);
@@ -64,6 +78,11 @@ export default function PromptViewer({
   const [editedPrompt, setEditedPrompt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+
+  const [drafts, setDrafts] = useState<LibraryListItem[]>([]);
+  const [selectedDraftId, setSelectedDraftId] = useState("");
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryMsg, setLibraryMsg] = useState<string | null>(null);
 
   const accentStyles = ACCENT_STYLES[accent] ?? ACCENT_STYLES.orange;
 
@@ -81,6 +100,24 @@ export default function PromptViewer({
     setLoading(false);
   }, [fetchPrompt]);
 
+  const refreshDrafts = useCallback(async () => {
+    if (!libraryCollection) return;
+    try {
+      const res = await fetch(
+        `/api/admin/prompt-library?collection=${encodeURIComponent(libraryCollection)}`,
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { drafts?: LibraryListItem[] };
+      setDrafts(data.drafts ?? []);
+    } catch {
+      // non-fatal
+    }
+  }, [libraryCollection]);
+
+  useEffect(() => {
+    if (libraryCollection) void refreshDrafts();
+  }, [libraryCollection, refreshDrafts]);
+
   const handleToggle = useCallback(async () => {
     if (open) {
       setOpen(false);
@@ -94,7 +131,6 @@ export default function PromptViewer({
   const handleEdit = (value: string) => {
     setEditedPrompt(value);
     if (onPromptChange) {
-      // If user changed from original, pass the override; if reset to original, pass null
       onPromptChange(value !== originalPrompt ? value : null);
     }
   };
@@ -111,9 +147,97 @@ export default function PromptViewer({
     if (onPromptChange) onPromptChange(null);
   };
 
+  const applyLoadedValue = (value: string) => {
+    setEditedPrompt(value);
+    if (onPromptChange) {
+      onPromptChange(value !== originalPrompt ? value : null);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!libraryCollection) return;
+    const value = (editedPrompt ?? customPrompt ?? "").trim();
+    if (!value) {
+      setLibraryMsg("Nothing to save — open/edit the prompt first");
+      return;
+    }
+    setLibraryBusy(true);
+    setLibraryMsg(null);
+    try {
+      const res = await fetch("/api/admin/prompt-library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          collection: libraryCollection,
+          value,
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean; draft?: { title: string }; error?: string };
+      if (!res.ok || !data.ok) {
+        setLibraryMsg(data.error || "Save failed");
+        return;
+      }
+      setLibraryMsg(`Saved “${data.draft?.title ?? "draft"}”`);
+      await refreshDrafts();
+    } catch {
+      setLibraryMsg("Save failed");
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
+
+  const handleLoadDraft = async () => {
+    if (!selectedDraftId) return;
+    setLibraryBusy(true);
+    setLibraryMsg(null);
+    try {
+      const res = await fetch(
+        `/api/admin/prompt-library?id=${encodeURIComponent(selectedDraftId)}`,
+      );
+      const data = (await res.json()) as { draft?: { value: string; title: string }; error?: string };
+      if (!res.ok || !data.draft) {
+        setLibraryMsg(data.error || "Load failed");
+        return;
+      }
+      applyLoadedValue(data.draft.value);
+      setOpen(true);
+      setLibraryMsg(`Loaded “${data.draft.title}”`);
+    } catch {
+      setLibraryMsg("Load failed");
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
+
+  const handleDeleteDraft = async () => {
+    if (!selectedDraftId) return;
+    if (!confirm("Delete this saved prompt draft?")) return;
+    setLibraryBusy(true);
+    setLibraryMsg(null);
+    try {
+      const res = await fetch("/api/admin/prompt-library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id: selectedDraftId }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setLibraryMsg(data.error || "Delete failed");
+        return;
+      }
+      setSelectedDraftId("");
+      setLibraryMsg("Draft deleted");
+      await refreshDrafts();
+    } catch {
+      setLibraryMsg("Delete failed");
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
+
   const isEdited = editedPrompt !== null && editedPrompt !== originalPrompt;
 
-  // Reload when style/mode/concept changes (debounced slightly so concept typing isn't noisy)
   useEffect(() => {
     const shouldLoad = open || defaultOpen;
     if (!shouldLoad) return;
@@ -126,12 +250,67 @@ export default function PromptViewer({
     }, delay);
 
     return () => window.clearTimeout(timer);
-    // reloadKey drives refetch; loadPrompt identity changes when parent re-renders
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey, open, defaultOpen, customPrompt, hasLoadedOnce]);
 
+  // If parent already has a custom prompt (e.g. just loaded), keep textarea in sync when opening
+  useEffect(() => {
+    if (customPrompt && editedPrompt === null) {
+      setEditedPrompt(customPrompt);
+    }
+  }, [customPrompt, editedPrompt]);
+
   return (
-    <div className="w-full">
+    <div className="w-full space-y-2">
+      {libraryCollection && (
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-gray-700/50 bg-gray-900/60 px-2 py-1.5">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 shrink-0">
+            Library
+          </span>
+          <select
+            value={selectedDraftId}
+            onChange={(e) => setSelectedDraftId(e.target.value)}
+            disabled={disabled || libraryBusy}
+            className="min-w-0 flex-1 max-w-[220px] px-2 py-1 bg-black/40 border border-gray-700 rounded text-[10px] text-gray-200 disabled:opacity-40"
+          >
+            <option value="">Saved drafts…</option>
+            {drafts.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.stale ? "⚠ " : ""}
+                {d.title}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleLoadDraft}
+            disabled={disabled || libraryBusy || !selectedDraftId}
+            className={`px-2 py-1 rounded text-[10px] font-bold border disabled:opacity-40 ${accentStyles.bg} ${accentStyles.text} ${accentStyles.border}`}
+          >
+            Load
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveDraft}
+            disabled={disabled || libraryBusy}
+            className="px-2 py-1 rounded text-[10px] font-bold border border-green-500/40 bg-green-500/10 text-green-400 disabled:opacity-40"
+          >
+            Save draft
+          </button>
+          <button
+            type="button"
+            onClick={handleDeleteDraft}
+            disabled={disabled || libraryBusy || !selectedDraftId}
+            className="px-2 py-1 rounded text-[10px] font-bold border border-red-500/40 bg-red-500/10 text-red-400 disabled:opacity-40"
+          >
+            Del
+          </button>
+          {libraryMsg && (
+            <span className="text-[9px] text-gray-400 w-full sm:w-auto">{libraryMsg}</span>
+          )}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={handleToggle}
@@ -154,7 +333,7 @@ export default function PromptViewer({
       </button>
 
       {open && (
-        <div className={`mt-2 rounded-lg border ${accentStyles.border} bg-black/30 overflow-hidden`}>
+        <div className={`mt-0 rounded-lg border ${accentStyles.border} bg-black/30 overflow-hidden`}>
           {loading && (
             <div className="p-3 text-center">
               <span className={`text-[10px] ${accentStyles.text} animate-pulse`}>Loading prompt...</span>

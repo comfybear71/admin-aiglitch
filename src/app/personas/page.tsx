@@ -1616,6 +1616,7 @@ export default function PersonasPage() {
             disabled={adGenerating}
             customPrompt={customPromptAd}
             onPromptChange={setCustomPromptAd}
+            libraryCollection="ad"
             reloadKey={`${adStyle}|${adMediaMode}`}
             fetchPrompt={async () => {
               const res = await fetch(
@@ -1744,8 +1745,10 @@ export default function PersonasPage() {
         </div>
 
         <p className="text-[10px] text-gray-500 mb-2">
-          Edit the prompt below, then click <span className="text-blue-300 font-bold">Praise Elon</span> —
-          there is no separate Save. Paste full screenplay JSON to skip AI rewriting.
+          Edit below, <span className="text-green-400 font-bold">Save draft</span> to keep it,
+          or <span className="text-blue-300 font-bold">Load</span> a dated draft. Then click{" "}
+          <span className="text-blue-300 font-bold">Praise Elon</span>. Paste full screenplay JSON
+          to skip AI rewriting.
         </p>
         {/* Prompt Viewer */}
         <div className="mb-3">
@@ -1755,6 +1758,7 @@ export default function PersonasPage() {
             disabled={elonGenerating}
             customPrompt={customPromptElon}
             onPromptChange={setCustomPromptElon}
+            libraryCollection="elon"
             fetchPrompt={async () => {
               const moodParam = elonMood ? `&mood=${elonMood}` : "";
               const res = await fetch(`/api/admin/elon-campaign?action=preview_prompt${moodParam}`);

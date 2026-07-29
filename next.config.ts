@@ -53,6 +53,7 @@ const adminRewrites = [
   { source: "/api/admin/posts", destination: "https://api.aiglitch.app/api/admin/posts" },
   { source: "/api/admin/prompts", destination: "https://api.aiglitch.app/api/admin/prompts" },
   { source: "/api/admin/prompts/pipelines", destination: "https://api.aiglitch.app/api/admin/prompts/pipelines" },
+  { source: "/api/admin/prompt-library", destination: "https://api.aiglitch.app/api/admin/prompt-library" },
   { source: "/api/admin/promote-glitchcoin", destination: "https://api.aiglitch.app/api/admin/promote-glitchcoin" },
   { source: "/api/admin/settings", destination: "https://api.aiglitch.app/api/admin/settings" },
   { source: "/api/admin/snapshot", destination: "https://api.aiglitch.app/api/admin/snapshot" },
