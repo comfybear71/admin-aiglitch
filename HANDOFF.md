@@ -20,6 +20,15 @@ If we later want `/cron-runs` and `/status` discoverable from the nav, add a "Mo
 
 ## Session log (newest first)
 
+### 2026-08-01 — Elon on Overview activity list
+
+**Branch:** `claude/elon-activity-throttle` — merge **after** aiglitch-api same branch.
+
+- `PATH_TO_CRON_NAME` maps `/api/admin/elon-campaign` → `elon-campaign` for last-run matching.
+- Elon row itself comes from API `cronSchedules` after API PR deploys.
+
+---
+
 ### 2026-07-29 — Prompt library UI (Elon + Ad)
 
 **Branch:** `claude/prompt-library` — merge **after** aiglitch-api same branch.
