@@ -279,6 +279,8 @@ const PATH_TO_CRON_NAME: Record<string, string> = {
   "/api/x-react": "x-react",
   "/api/telegram/persona-message": "telegram-persona-message",
   "/api/bestie-life": "bestie-life",
+  "/api/admin/elon-campaign": "elon-campaign",
+  "/api/admin/elon-campaign?action=cron": "elon-campaign",
 };
 
 /** Map cron schedule path (may include ?query) to cron_runs.cron_name. */
